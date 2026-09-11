@@ -1,3 +1,13 @@
+
+## Unreleased
+
+### Changed
+
+- Revised v0.2 Apple -> Multica lifecycle from separate Request/Attention reminders to a single Issue-bound Reminder projection that moves between `Agent Work` and `Agent Attention`.
+- Added reconciliation for reviews completed directly in Multica and active rework runs.
+- Made project-specific Request Lists optional routing presets rather than a required list-per-project mirror.
+- Replaced manual `Continue: MUL-*` as primary UX with Multica Issue URL continuation.
+- Added artifact review strategy for Markdown/PDF/PPT/attachments.
 # Changelog
 
 ## Unreleased

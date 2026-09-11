@@ -1,752 +1,820 @@
-# Apple Reminders -> Multica Dispatch Design
+# Apple Reminders <-> Multica Dispatch & Attention Design
 
 > 日期：2026-09-11
 >
-> 状态：Design for v0.2; v0.1 当前只实现 Multica -> Apple Attention projection
+> 状态：v0.2 Design Revision 2；当前可运行代码仍为 v0.1（Multica -> Apple Attention），本文件定义下一阶段双向实现。
 >
-> 核心原则：**Apple Reminders 是 Human Action / Capture UI；Multica 是 Agent Work Source of Truth。**
+> 核心原则：**一个 Multica Issue 对应最多一个活跃 Apple Reminder 投影；Reminder 在不同 List 之间迁移，而不是为 Request / Review / Rework 各复制一条。**
 
-## 1. 为什么需要第二条方向
+## 1. 设计目标
 
-v0.1 只解决：
-
-```text
-Multica Issue / Run
-      ↓
-需要人工 Review / 解阻 / 恢复
-      ↓
-Apple Reminder
-```
-
-v0.2 增加反方向：
+Bridge 要同时支持两条方向：
 
 ```text
-Apple Reminder
-      ↓
-用户想把一件工作交给 Agent
-      ↓
-Bridge Dispatch Policy
-      ↓
-Multica Issue / Comment-triggered follow-up
+Apple Reminders                       Multica
+----------------                      ----------------
+用户随手创建 Agent Request   ------>  Issue / Run
+用户需要 Review/解阻         <------  Issue / Run 状态
 ```
 
-两个方向必须保持语义对称但数据权威不对称：
+Apple Reminders 负责：
+
+- 捕捉“我想交给 Agent 做”的意图；
+- 在 iPhone / iPad / Mac 上提示“现在轮到我了”；
+- 提供项目、摘要、产物提示和 Multica 深链。
+
+Multica 负责：
+
+- Project / resource / local_directory；
+- Issue；
+- Agent / runtime；
+- Run；
+- comments / attachments；
+- 完整执行和 Review 上下文。
+
+Bridge 负责：
+
+- Apple Reminder 与 Multica Issue 的身份映射；
+- dispatch routing；
+- AttentionPolicy；
+- EventKit List 迁移；
+- 去重 / 恢复 / 状态协调。
+
+---
+
+## 2. 不使用 Subtask：原因不只是 EventKit 限制
+
+Apple Reminders UI 支持 subtask，但截至 2026-09-11，EventKit 没有公开 API 获取 `EKReminder` 的 subtask 关系；Reminder List 的 group/folder/section 也不能作为稳定程序接口。
+
+但即使 Apple 将来开放 subtask，本 Bridge 也不建议把 Agent 生命周期建模成：
 
 ```text
-Apple -> Multica : capture / dispatch intent
-Multica -> Apple : human-attention projection
-
-Multica remains authoritative for Agent work lifecycle.
+Request
+  |- Agent running
+  |- Review round 1
+  |- Rework
+  `- Review round 2
 ```
 
-## 2. 不使用 Apple Reminder 子任务作为主模型
+原因更本质：
 
-Apple Reminders UI 支持 subtasks，但截至 2026-09-11，EventKit 没有公开 API 读取某个 `EKReminder` 的 subtask 关系。EventKit 同样没有公开的 Reminder List group/folder / section API 可以作为可靠集成契约。
+- `running / review / rework` 是**同一个工作项的状态**，不是任务拆分；
+- Multica 本身已经用一个 Issue + 多个 Run 表达这件事；
+- 把 lifecycle 伪装成 subtask 会制造重复状态源；
+- 一个“已完成 Request”下面挂一个“未完成 Review”在人的待办语义上也很别扭。
 
-因此 Bridge 不建立：
+所以采用：
 
 ```text
-Request Reminder
-  ├── Agent running subtask
-  ├── Agent completed subtask
-  └── Review subtask
+1 Multica Issue
+      <->
+0..1 active Apple Reminder projection
 ```
 
-这在 Reminders UI 看起来漂亮，但程序端无法可靠维护。
+---
 
-推荐改成两个普通 List：
+## 3. Apple List 模型：Capture、Work、Attention
+
+Bridge 管理三个概念层。
+
+### 3.1 Agent Requests：捕捉入口
+
+至少存在一个通用 List：
 
 ```text
-Agent Requests     // human -> agent
-Agent Attention    // agent -> human
+Agent Requests
 ```
 
-用户可以在 Reminders UI 里手工把这些 List 放入一个 Folder/Group，但 Bridge 不读取、不创建、不依赖该 Folder。
+用户在 iPhone/Mac 创建 Reminder，即表示：
 
-## 3. Request 与 Attention 的生命周期
+> 把这件工作委派给 Agent。
 
-### 3.1 Request Reminder
-
-用户创建：
+可以另外为少数高频项目配置 Route List：
 
 ```text
-List: Agent · Personal AI
-Title: 修复 Ask 外部查证无法跳过的问题
-Notes: （可选）先补测试，再改实现
+Agent · Personal AI
+Agent · Website
+Agent · Infra
 ```
 
-Bridge 看到一个未处理 Request 后：
+这些 List 只是“快速项目选择器”，不是 Multica Project 的镜像。
+
+### 3.2 Agent Work：Bridge 管理的非人类等待区
+
+新增一个 Bridge-managed List：
 
 ```text
-validate
-  ↓
-resolve route
-  ↓
-create Multica Issue
-  ↓
-assign Agent / start Run
-  ↓
-write receipt back to original Reminder
-  ↓
-mark Request Reminder completed
+Agent Work
 ```
 
-为什么 dispatch 成功后自动完成原 Reminder：
-
-> 这条 Reminder 所表达的人类动作是“把工作委派出去”。成功提交 Multica 后，这个人类动作已经完成。Agent 的执行过程不是人的 pending todo。
-
-原 Reminder 保留为 completed receipt，Notes 追加 Bridge 管理区：
+成功 dispatch 后，**原来的同一条 Reminder 不标记完成**，而是移动到 `Agent Work`：
 
 ```text
-先补测试，再改实现
-
---- Multica Bridge ---
-Status: Dispatched
-Issue: MUL-381
-Project: Personal AI
-Agent: Coding Agent
-Submitted: 2026-09-11 15:42
-Open: https://multica.ai/...
-Bridge ref: request/<uuid>
+Agent · Personal AI
+  修复 Ask skip
+       |
+       | dispatch success
+       v
+Agent Work
+  修复 Ask skip · MUL-381
 ```
 
-Bridge 只修改 marker 之后的 managed block，不改 marker 上方的用户 Notes。
+此时 Bridge：
 
-### 3.2 Agent 正在执行
+- 清除“现在提醒我”的 alarm；
+- 保留/记录 Issue deep link；
+- 在 Notes managed block 写入 project / agent / issue / 当前状态；
+- 不把 running progress 逐条塞进 Reminder。
 
-不持续更新 Apple Reminder：
+这样 Reminder 仍然代表同一件工作，但不会污染人的 Attention 队列。
 
-```text
-queued
-running
-waiting_local_directory
-retrying
-```
+### 3.3 Agent Attention：现在轮到人
 
-全部留在 Multica。
-
-Apple Reminders 不做 progress tracker。
-
-### 3.3 需要人工介入
-
-Multica Issue：
+当 Multica Issue 进入真正的人类注意状态：
 
 ```text
 in_review
+blocked + human required
+unrecoverable failure
+input_required
 ```
 
-Bridge 在统一 `Agent Attention` List 新建：
+Bridge 把**同一条 Reminder**移动到：
 
 ```text
-Review · Personal AI · Ask external verification skip
-
-Codex 已完成第一轮实现。
-2 个文件修改，27 tests passed。
-Multica: MUL-381
-
-[Open Multica]
+Agent Attention
 ```
 
-这是一条新的 Human Action，而不是 Request 的 subtask。
+并设置：
 
-### 3.4 Rework / 第二轮 Review
+- title 前缀：`Review / Unblock / Check`；
+- compact summary；
+- priority；
+- EventKit alarm；
+- Multica Issue URL；
+- artifact manifest 摘要。
+
+当人类动作结束、Agent 又开始工作时，再把同一条 Reminder 移回 `Agent Work`。
+
+终态：
+
+```text
+Multica done / cancelled
+     -> mark the same Reminder completed
+```
+
+因此 Apple 中的一个 Reminder 与 Multica 的一个 Issue 生命周期连续对应。
+
+---
+
+## 4. 完整状态机
+
+```text
+             Apple capture
+                  |
+                  v
+        [Agent Requests / Project Route]
+                  |
+          dispatch succeeds
+                  |
+                  v
+              [Agent Work]
+                  |
+       Multica needs a human
+                  |
+                  v
+           [Agent Attention]
+            /             \
+           /               \
+   human requests rework    human accepts
+         /                       \
+        v                         v
+  [Agent Work]               completed
+        |
+    next review
+        |
+        +----------> [Agent Attention]
+```
+
+### 4.1 Attention 不会因为用户从 Multica 直接 Review 而积压
+
+Bridge 必须做**双向 reconciliation**。
+
+例如用户没有从 Apple Reminder 打开，而是直接打开 Multica：
+
+```text
+MUL-381 = in_review
+Apple    = Agent Attention
+```
 
 用户在 Multica：
 
 ```text
-Request changes
-  ↓
-Agent rework
-  ↓
-in_review again
+Request changes -> new run / in_progress
 ```
 
-Bridge 创建下一轮 Attention Reminder：
+Bridge 下一轮同步看到：
 
 ```text
-MUL-381 / review-generation-2
+active run exists OR issue leaves in_review
 ```
 
-不复活原 Request。
-
-## 4. Project / 代码目录应该如何选择
-
-### 4.1 Apple 侧不要直接保存本地目录路径
-
-不要让 Reminder 写：
+立即：
 
 ```text
-/Users/alice/Code/Personal-AI
+Agent Attention -> Agent Work
+clear attention alarm
 ```
 
-原因：
-
-- 路径是 machine-local，不适合 iCloud；
-- 可能泄露用户目录结构；
-- 同一 Project 在两台 daemon 上可以有不同路径；
-- Multica 已经有更正确的 `Project -> Resources` 抽象。
-
-Multica Project 可以绑定 Git repository 或某台 daemon 上的 `local_directory`。当 Issue 属于该 Project，Project description/resources 会进入 Run context；local directory 绑定由 Multica Desktop/daemon 负责。
-
-所以 Apple Reminder 只选择：
+如果用户确认完成：
 
 ```text
-Multica Project
+MUL-381 -> done
 ```
 
-不选择 raw path。
-
-### 4.2 推荐：Routing Lists
-
-对经常使用的项目，在 Bridge Settings 建立路由：
+Bridge：
 
 ```text
-Apple List                  Multica Project     Default Agent
+mark Apple Reminder completed
+```
+
+所以 `Agent Attention` 只应包含**此刻仍轮到人的任务**。
+
+### 4.2 Multica 状态没有变化时怎么办
+
+Multica 官方说明：Run 完成不会自动等于 Issue done；Agent 会显式写 `in_review`，`done` 通常由人工确认。
+
+因此如果用户只在 Multica 看过结果，但：
+
+- 没有改 Issue status；
+- 没有触发新的 Run；
+- 没有把 Issue 设为 done；
+
+Bridge 无法可靠知道“Review 已经结束”。这种情况下 Attention 保持是正确行为。
+
+如果用户评论并 @Agent 触发新 Run，但 Issue 仍暂时保持 `in_review`，Bridge 应优先看 **active Run**：
+
+```text
+in_review + active agent run
+    => agent_working
+    => move to Agent Work
+```
+
+避免 Review Reminder 在 Agent 已经返工时继续显示。
+
+---
+
+## 5. Project / 代码目录选择
+
+### 5.1 Apple 只选择 Multica Project，不选择 raw path
+
+Multica Project Resource 已经负责：
+
+```text
+Project
+  |- Git repository
+  `- local_directory on daemon A/B
+```
+
+同一 Project 在不同 daemon 上甚至可以绑定不同本地目录。因此 Apple 不保存：
+
+```text
+/Users/foo/code/project
+```
+
+只保存/解析：
+
+```text
+Multica Project ID / alias
+```
+
+### 5.2 Route List 在 Bridge Settings 配置
+
+Bridge Settings：
+
+```text
+Apple Request List          Multica Project      Default Agent
 ----------------------------------------------------------------
-Agent · Personal AI         Personal AI         Coding Agent
-Agent · Website             Website             Frontend Agent
-Agent · Infra               Infrastructure      DevOps Agent
+Agent · Personal AI         Personal AI          Coding Agent
+Agent · Website             Website              Frontend Agent
+Agent · Infra               Infra                DevOps Agent
 ```
 
-用户在 iPhone 只需要选择 Reminder List，就等价于选项目：
+所以用户选择 Apple List 就完成了最常见的 project routing。
+
+### 5.3 不要求每个 Project 都建一个 List
+
+推荐规则：
+
+- 2~5 个高频 Project：建立 Route List；
+- 其他偶发 Project：走 `Agent Requests`；
+- 不自动为 Multica 的所有 Project 镜像 Apple List。
+
+Bridge Settings 增加：
 
 ```text
-Reminders
-  Agent · Personal AI
-    + 修复 Ask skip verification
+Projects
+Personal AI   [Pin to Reminders]  -> Agent · Personal AI
+Website       [Pin to Reminders]  -> Agent · Website
+Data Tools    [not pinned]
 ```
 
-Bridge 根据 EventKit `calendar` / List identity 路由：
+这样 Apple Reminders 不会被几十个 Project List 污染。
+
+### 5.4 Generic Agent Requests 如何选择 Project
+
+第一版 fallback：
 
 ```text
-Agent · Personal AI
-   ↓
-projectId = <Personal AI>
-agentId   = <Coding Agent>
+Bridge default project
 ```
 
-这是移动端最省操作的方式。
-
-### 4.3 为什么不使用 Apple Tags 作为主契约
-
-Reminders UI 支持 `#tags` 和基于 tag 的 Smart Lists，但 EventKit 的公开 `EKReminder` / `EKCalendarItem` API 没有暴露 Reminders tag 字段。
-
-因此：
-
-- 用户当然可以自己使用 Apple tags；
-- Bridge 不把 Apple tag 当机器可依赖的 project selector；
-- 不通过逆向 Reminders SQLite 获取 tag。
-
-### 4.4 大量/偶发项目：Generic Request List + Notes override
-
-如果项目很多，不值得每个项目创建一个 Apple List：
+如果没有默认或无法安全判断：
 
 ```text
-List: Agent Requests
-Title: 检查登录模块 regression
-Notes:
-Project: Website
-Agent: Backend Reviewer
+do not dispatch
+mark as needs_route
+notify on Mac
 ```
 
-Bridge 支持一个很小的 managed dispatch header：
+长期可增加一个 Apple Shortcut / Share workflow 提供菜单式项目选择，但不把 EventKit tag 当机器契约。
+
+---
+
+## 6. Continue Existing Work：不要要求手输 `Continue: MUL-381`
+
+`Continue: MUL-381` 只保留为调试/高级语法，不作为正常用户 UX。
+
+### 6.1 最优先：Multica Issue URL
+
+如果 Reminder 的 `URL` 是 Multica Issue URL：
 
 ```text
-Project: <project alias>
-Agent: <optional agent alias>
-Continue: <optional MUL issue key>
-
-<remaining text becomes task details>
+https://multica.ai/<workspace>/.../MUL-381
 ```
 
-优先级：
+Bridge 自动解析：
 
 ```text
-explicit Notes override
-    > routed List preset
-    > Bridge default project/agent
+intent = continue_existing_issue
+issue  = MUL-381
 ```
 
-如果 project/agent 无法唯一匹配，Bridge **不派发**，保留 Request 未完成，并加一个本地错误 receipt / macOS notification，让用户到 Bridge Settings 修复 route。
+用户不需要记 key。
 
-## 5. 新建 Issue 还是继续旧 Issue
+### 6.2 从已有 Agent Reminder 继续，不需要任何 ID
 
-Bridge 必须区分两种 intent。
+更重要的是：采用“一 Issue 一 Reminder”以后，绝大多数 continuation 根本无需新建 Reminder。
 
-### 5.1 默认：New Work
-
-普通 Request：
-
-```text
-Title: 修复 Ask 外部查证无法跳过的问题
-```
-
-创建新 Multica Issue：
-
-```bash
-multica issue create \
-  --title ... \
-  --description-stdin \
-  --project <project> \
-  --assignee <agent>
-```
-
-Multica Issue 是长期工作单元，后续可以包含多次 Run。
-
-### 5.2 Continue Existing Issue
-
-用户希望继续已有 Agent 工作：
-
-```text
-Title: 再检查一下这个 patch 的 backward compatibility
-Notes:
-Continue: MUL-381
-```
-
-Bridge 不创建第二个 Issue，而是：
-
-```text
-resolve MUL-381
-  ↓
-validate access / current project
-  ↓
-add issue comment
-  ↓
-@mention configured/current agent
-  ↓
-new Multica Run against the same Issue
-```
-
-这样 Issue 的讨论、结果与 session continuation 都留在同一个工作记录中。
-
-Multica 对同一 Issue 后续运行会尽量恢复原 AI coding-tool session；如果原 session 不可用，Multica 负责 fallback。Bridge **不保存、不选择 raw Codex / Claude session id**。
-
-### 5.3 也可用 URL 作为 continuation target
-
-如果 Apple Reminder 的 URL 字段已经是一个 Multica Issue URL：
-
-```text
-https://.../MUL-381
-```
-
-Bridge 可以把它解释为：
-
-```text
-Continue = MUL-381
-```
-
-这比要求用户记 Issue key 更友好。
-
-## 6. “继续特定历史 Chat”应该怎么做
-
-需要区分两个概念。
-
-### 6.1 历史 Issue conversation —— v0.2 推荐支持
-
-这是最应该支持的：
-
-```text
-Continue: MUL-381
-```
-
-Issue 的 comments + runs 本来就是长期上下文；Multica 还会尽量 resume 同一 provider session。
-
-### 6.2 Multica private Chat —— 暂不作为 CLI v0.2 核心能力
-
-Multica 也有独立 private Chat；同一 Chat 会尽量继续原 AI coding-tool session，也可以挂 Project context。
-
-但是当前官方 CLI 的 `multica chat` 主要服务外部 chat integration，不是任意浏览/选择 Workspace private Chat 的通用 CLI contract。
-
-因此 v0.2 不设计：
-
-```text
-Apple Reminder
- -> browse all Multica private chats
- -> pick arbitrary chat
- -> append message
-```
-
-未来有两个实现方向：
-
-1. `MulticaApiSource` 验证并固定 private-chat API contract 后加入 `ChatTarget`；
-2. 用户从 Multica Chat 分享/复制一个稳定 Chat deep link 到 Reminder URL，Bridge 只做 target resolution。
-
-无论哪一种，都不要让用户选择 raw Codex/Claude session ID。session 生命周期是 Multica/runtime concern，不是 Apple Reminder domain。
-
-## 7. Apple 侧推荐信息模型
-
-### 7.1 List
-
-```text
-Agent Requests              // generic fallback
-Agent · Personal AI         // optional route preset
-Agent · Website             // optional route preset
-Agent · Infra               // optional route preset
-
-Agent Attention             // all projects, unified human queue
-```
-
-为什么 Attention 不按项目拆 List：
-
-> Attention 是“今天轮到我做什么”，应该统一进入人的行动队列；Project 是上下文，不应该再次分裂人类 Review inbox。
-
-Title 中带 compact project label：
-
-```text
-Review · Personal AI · Ask verification skip
-Unblock · Website · OAuth regression
-```
-
-### 7.2 Notes
-
-Request 用户可编辑区：
-
-```text
-Project: Personal AI          // optional
-Agent: Coding Agent           // optional
-Continue: MUL-381             // optional
-
-请先补取消/skip 的测试，再修改实现。
-```
-
-Bridge receipt 区：
-
-```text
---- Multica Bridge ---
-Status: Dispatched
-Issue: MUL-381
-...
-```
-
-### 7.3 URL
-
-Request 提交后，Bridge 写 Multica Issue URL。
-
-Attention Reminder 一开始就写对应 Issue URL。
-
-### 7.4 Due / Alarm
-
-第一版建议：
-
-- Request Reminder 的 Apple due/alarm 是**人的 capture/dispatch reminder**，不自动解释成 Agent deadline；
-- 如果需要 Multica Issue due date，使用 Notes `Due:` override 或未来 Bridge UI/Shortcut；
-- Bridge 自己检测到 Request 时立即 dispatch。
-
-以后如要支持“明天 9 点才让 Agent 开始”，增加显式：
-
-```text
-Dispatch-At: 2026-09-12 09:00
-```
-
-不要隐式重解释 Apple due date，避免用户以为是人的提醒时间，Bridge 却把它当 Agent schedule。
-
-## 8. Dispatch 状态机
-
-```text
-Apple Request created
-      |
-      v
-DISCOVERED
-      |
-      +-- invalid route ------> NEEDS_CONFIGURATION
-      |
-      +-- future dispatch ----> DEFERRED
-      |
-      v
-DISPATCHING
-      |
-      +-- create issue/comment failed -> RETRYABLE_ERROR
-      |
-      v
-DISPATCHED
-      |
-      v
-complete original Request Reminder
-      |
-      v
-Multica owns lifecycle
-      |
-      +-- in_review ----------> Agent Attention Reminder
-      +-- human-blocked ------> Agent Attention Reminder
-      +-- failure/no retry ---> Agent Attention Reminder
-      `-- done ---------------> no new human action
-```
-
-Bridge DB 新增：
-
-```text
-request_projection
-  request_reminder_id
-  request_external_id
-  request_payload_hash
-  route_id
-  multica_issue_id
-  multica_issue_key
-  dispatch_kind = new_issue | continue_issue
-  state
-  dispatched_at
-```
-
-保证 Bridge 重启、iCloud identifier 变化或 CLI timeout 后不会重复创建 Multica Issue。
-
-## 9. Request 修改与幂等
-
-### 派发前修改
-
-只要仍是 `DISCOVERED/DEFERRED`，读取最新 title/notes。
-
-### 派发中修改
-
-以 dispatch transaction 捕获的 payload hash 为准；成功后 receipt 写明提交版本。
-
-### 派发后修改 completed Request
-
-默认**不自动修改 Multica Issue**。
-
-原因：用户编辑一个已完成 Reminder 可能只是整理个人记录，不能隐式产生 Agent side effect。
-
-要继续工作，创建新 Request 并指定 `Continue:` 或 Multica URL。
-
-## 10. 删除/完成语义
-
-### 用户在派发前完成 Request
-
-解释为：
-
-```text
-cancel local dispatch intent
-```
-
-Bridge 不创建 Multica Issue。
-
-### 用户在派发后取消完成状态
-
-不自动重新派发。
-
-### 用户删除已派发 Request
-
-只删除本地 capture receipt，不删除 Multica Issue。
-
-### 用户完成 Attention Reminder
-
-仍然只代表“我处理了提醒”，不等于 Multica `done`。
-
-## 11. 推荐设置 UI
-
-新增 `Request Routing`：
-
-```text
-Apple -> Multica Dispatch
-[x] Enable request intake
-
-Generic request list
-Agent Requests
-
-Routes
-----------------------------------------------------------------
-Apple List              Project           Agent
-Agent · Personal AI     Personal AI       Coding Agent
-Agent · Website         Website           Frontend Agent
-Agent · Infra           Infrastructure    DevOps Agent
-
-[+ Add Route]
-
-Default behavior
-Create: Multica Issue
-Start immediately: Yes
-Complete Request after accepted: Yes
-
-Continuation
-[x] Recognize `Continue: MUL-xxx`
-[x] Recognize Multica Issue URL
-```
-
-Bridge 应从 Multica 查询 Projects/Agents，让用户在 Settings picker 中选择，不手输 ID。
-
-## 12. 安全边界
-
-1. 不把 raw local directory path 写进 iCloud Reminders。
-2. 不把 Multica PAT 写入 Reminder。
-3. 默认只允许 dispatch 到 Settings 中显式 allow-listed Workspace/Project/Agent。
-4. Request title/notes 属于不可信用户输入；CLI 使用 stdin / structured args，不能拼 shell command。
-5. `Continue:` 只能解析当前 Workspace 中用户可访问的 Issue。
-6. 删除 Apple Reminder 不删除 Multica work。
-7. 不用 checkbox 映射 approval / merge / issue done。
-
-## 13. 真实使用场景
-
-### 场景 A：在外面用 iPhone 派一个 Coding Task
-
-```text
-Apple Reminders
-List: Agent · Personal AI
-Title: 给 Ask 的外部查证增加 Skip 按钮
-Notes: 先写测试，不能让 skip 把已有答案丢掉
-```
-
-Mac 上 Bridge：
-
-```text
-Agent · Personal AI route
- -> Multica Project: Personal AI
- -> Coding Agent
- -> create MUL-421
- -> complete Request receipt
-```
-
-Codex 在家里的 Mac mini daemon 工作。
-
-完成后：
+例如：
 
 ```text
 Agent Attention
-Review · Personal AI · Ask external verification skip
+Review · Personal AI · Ask Skip
+URL = MUL-381
 ```
 
-你在手机点链接进入 Multica Review。
-
-### 场景 B：一个项目对应本机代码目录
-
-Multica Desktop 里一次配置：
+用户点开 Multica，在同一个 Issue 中评论/Request Changes；Bridge 自动跟随状态：
 
 ```text
+Attention -> Work -> Attention
+```
+
+所以正常 rework workflow 完全没有 `Continue:` 输入。
+
+### 6.3 用户主动从 Apple 新建“继续旧任务”
+
+推荐体验：
+
+```text
+Multica Web/Desktop/iPhone browser
+  -> Copy/Share Issue URL
+  -> Add to Reminders / Agent Requests
+  -> 用户只写新的要求
+```
+
+Bridge 看到 Multica URL 后，把 Reminder 内容作为该 Issue 的 follow-up comment / Agent trigger，而不是创建新 Issue。
+
+### 6.4 可选后续：Recent Work picker
+
+若以后需要更顺滑，可实现 macOS Bridge 的：
+
+```text
+New Agent Request
+  Project: Personal AI
+  Continue: [Recent Multica Issues...]
+```
+
+移动端若要做到无 token 的“最近 Issue picker”，更适合通过专门的 Shortcut/轻量 companion 实现；不建议把 Multica PAT 塞进普通 Apple Shortcut。
+
+---
+
+## 7. 历史 Chat continuation
+
+### 7.1 Issue conversation：支持
+
+Multica Issue 本身已经包含：
+
+- description；
+- comments；
+- previous runs；
+- provider session reference。
+
+同一 Issue 后续 Run 会尽量恢复 provider session，不能恢复时由 Multica 创建新 session。
+
+因此 Bridge 的正常 continuation target 是：
+
+```text
+Multica Issue
+```
+
+而不是 raw Codex / Claude Code session id。
+
+### 7.2 Multica private Chat：暂不纳入 v0.2 核心
+
+当前 CLI 的 `multica chat` 不是浏览 arbitrary Workspace private Chat 的通用 contract。因此：
+
+```text
+v0.2 target = new issue | existing issue
+```
+
+未来 Direct API adapter 若有稳定 Chat API，再增加：
+
+```text
+existing_chat
+```
+
+---
+
+## 8. Artifact Review：Apple Reminder 应该提供什么
+
+原则：
+
+> Reminder 是 Review launcher，不是 artifact storage/viewer。
+
+EventKit 可靠提供的是 title、notes、URL、alarms、due/priority 等；不要依赖没有公开 Reminder attachment API 的能力，把文件强行复制到 Reminder。
+
+### 8.1 Attention Reminder 内容
+
+例：
+
+```text
+Review · Personal AI · Architecture proposal
+
+Multica: MUL-421
 Project: Personal AI
-Resource:
-  local_directory
-  daemon: MacBook-Pro
-  path: /Users/.../Personal-AI
+Agent: Claude Code
+
+Result:
+完成架构方案，需要人工确认 3 个决策。
+
+Artifacts:
+- architecture.md
+- migration-plan.pdf
+- review-deck.pptx
+
+Primary review: Open Multica
 ```
 
-Apple 以后只选：
+`URL` 永远优先放**稳定的 Multica Issue deep link**。
+
+原因：Multica Issue 是持久上下文；临时 attachment download URL 可能过期，不适合存进长期 Reminder。
+
+### 8.2 Markdown
+
+如果 Agent 的主要结果已经写在 Multica comment / result 中：
+
+- Apple Notes 放 3~10 行 summary；
+- Reminder URL 打开 Multica Issue；
+- 用户在 Multica 直接看 Markdown/rendered discussion。
+
+### 8.3 PDF / PPT / Office 文档
+
+Multica comments 支持 attachments，CLI 也支持 attachment upload/download。
+
+推荐：
 
 ```text
-List = Agent · Personal AI
+Reminder
+  -> show artifact names/count + summary
+  -> URL opens Issue
+  -> user taps attachment
+  -> iPhone/macOS opens PDF/PowerPoint/Keynote/Files as appropriate
 ```
 
-Reminder 不需要、也不应该知道绝对路径。
+不把文件本体复制进 Apple Reminder。
 
-### 场景 C：两台机器有同一个项目
+### 8.4 Primary Artifact 快捷打开（可选 v0.3）
 
-Multica Project 同时有不同 daemon 上对应资源/运行上下文；Agent 自己绑定具体 runtime。
-
-Apple 仍然只是：
+如果 Direct API 能稳定取得**可长期访问**的 artifact link，可增加：
 
 ```text
-Project = Personal AI
-Agent = Coding Agent
+Primary Artifact: migration-plan.pdf
 ```
 
-机器选择留在 Multica。
+但 Reminder 的唯一 `URL` 默认仍指向 Issue；如果要一键打开 primary artifact，更适合在 Notes managed block 中附链接，或由 Bridge companion UI 提供 `Open Primary Artifact`。
 
-### 场景 D：继续昨天的 Agent Task
+不要把短时 signed download URL 作为 Reminder 的长期主 URL。
 
-昨天：
+### 8.5 Artifact 摘要来源
+
+Bridge 不必自己用 LLM 重新读 PDF/PPT。
+
+优先：
 
 ```text
-MUL-381
+latest Agent result / final comment summary
++ attachment names/types
 ```
 
-今天 iPhone 新建：
+如未来要做智能 artifact digest，再作为 optional classifier，而不是 v0.2 dispatch 的前置能力。
+
+---
+
+## 9. 一条 Reminder 的 managed metadata
+
+Reminder 用户正文与 Bridge managed block 分离：
 
 ```text
+用户输入正文，可自由编辑。
+
+--- Multica Bridge ---
+Bridge-ID: brg_...
+Issue: MUL-381
+Issue-ID: ...
+Project: Personal AI
+Agent: Coding Agent
+State: agent_work | attention_review
+Source-List: Agent · Personal AI
+Last-Sync: 2026-09-11T16:45:00+08:00
+Open: https://multica.ai/...
+```
+
+SQLite 仍是主要 identity store；managed block 用于 EventKit identifier 因 full sync 失效后的恢复。
+
+Apple 官方说明 `calendarItemIdentifier` 在 full sync 后可能失效，因此必须保留可恢复锚点。
+
+---
+
+## 10. Identity / Projection 模型
+
+建议数据表从“review cycle -> reminder”升级成“issue -> reminder projection”：
+
+```sql
+CREATE TABLE issue_projection (
+  issue_id TEXT PRIMARY KEY,
+  issue_key TEXT NOT NULL,
+  reminder_calendar_item_id TEXT,
+  bridge_ref TEXT NOT NULL UNIQUE,
+  source_request_list_id TEXT,
+  current_list_role TEXT NOT NULL,
+  current_attention_reason TEXT,
+  review_generation INTEGER NOT NULL DEFAULT 0,
+  last_issue_status TEXT,
+  last_active_run_id TEXT,
+  last_payload_hash TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+```
+
+`review_generation` 仍保留做诊断/历史，但不再为每轮 Review 创建一条新的 Apple Reminder。
+
+---
+
+## 11. Reconciliation 优先级
+
+每次 sync：
+
+```text
+1. Multica terminal state?
+   -> complete Reminder
+
+2. Active agent Run?
+   -> Agent Work
+
+3. Issue status category = in_review?
+   -> Agent Attention
+
+4. blocked/failure human-required?
+   -> Agent Attention
+
+5. still-open normal agent work?
+   -> Agent Work
+```
+
+重要：
+
+```text
+active Run > stale in_review presentation
+```
+
+用于处理人类在 Multica 评论并触发 rework、但 status 还未马上改变的情况。
+
+---
+
+## 12. 用户直接操作 Apple Reminder
+
+### 12.1 在 Agent Work 中手工完成
+
+默认不把 Multica Issue 设 done。
+
+Bridge 记录：
+
+```text
+user_suppressed_projection = true
+```
+
+后续除非出现新的高优 Attention 或用户选择恢复，否则不死循环重新打开。
+
+### 12.2 在 Agent Attention 中手工完成
+
+同样不解释为“批准结果”。
+
+只表示：
+
+> 不要再用 Apple Reminders 提醒我这一轮/这个投影。
+
+Multica 仍权威。
+
+### 12.3 在 Multica Review
+
+这是推荐的真正业务操作位置：
+
+```text
+Approve -> done
+Request changes -> new run / work state
+Comment + @Agent -> new run
+```
+
+Bridge 只是跟随并移动 Apple Reminder。
+
+---
+
+## 13. 典型真实场景
+
+### A. 手机随手派一个新 coding task
+
+```text
+iPhone
 Agent · Personal AI
-Title: 再确认 Windows 路径兼容，并补一个测试
-Notes:
-Continue: MUL-381
+“Ask 的 verification 加 Skip，并补测试”
+        |
+        v
+Bridge -> Multica Personal AI Project -> Coding Agent
+        |
+        v
+same Reminder -> Agent Work
+        |
+        v
+Agent delivers -> in_review
+        |
+        v
+same Reminder -> Agent Attention + alarm
 ```
 
-Bridge：
+### B. 用户直接在 Multica Review
 
 ```text
-comment on MUL-381
-@Coding Agent ...
+Apple Attention exists
+User ignores Apple and opens Multica directly
+Request Changes
+Agent run starts
+Bridge next sync
+Attention -> Agent Work
 ```
 
-Multica 在同一 Issue 中产生新 Run，并尽量 resume 历史 provider session。
+没有旧 Review 残留。
 
-### 场景 E：Agent 被卡住
-
-Multica：
+### C. 第二轮 Review
 
 ```text
-blocked
-reason: 需要用户确认是否允许修改 production config
+Agent Work
+ -> agent delivers again
+ -> same Reminder moves back to Agent Attention
 ```
 
-Bridge：
+不创建 `Review #2` 垃圾条目，但 `review_generation=2` 保留在 Bridge DB/Notes receipt。
+
+### D. 多项目
+
+```text
+Agent · Personal AI -> Personal AI Project -> Coding Agent
+Agent · Website     -> Website Project     -> Frontend Agent
+Agent Requests      -> default/fallback route
+```
+
+所有真正轮到人的工作仍统一进入：
 
 ```text
 Agent Attention
-Unblock · Infra · production config decision
 ```
 
-不污染原 Request。
+因为它回答的是“我现在要处理什么”，而不是“属于哪个项目”。
 
-### 场景 F：Agent 自己恢复的错误
+### E. 继续已有 Multica Issue
 
-Run failed 但 Multica 正在 retry：
+用户从 Multica 复制/分享 MUL-381 URL 到新 Reminder，只写：
 
 ```text
-No Apple Reminder
+再补 Windows path 测试
 ```
 
-重试最终失败且没有 active retry：
+Bridge 识别 URL：
 
 ```text
-Agent Attention
-Check failed Agent task · Personal AI · ...
+continue MUL-381
 ```
 
-### 场景 G：私人 exploratory Chat
+不要求手输 Issue key。
 
-“帮我跟 Agent 随便讨论一下设计”更适合 Multica Chat，而不是 Apple Request 默认路由。
+### F. 文档 / PDF / PPT 交付
 
-Bridge v0.2 可以先让用户在 Reminder URL 放 Chat deep link作为打开入口，但不自动向任意 private Chat 发消息；等稳定 API contract 后再实现真正 ChatTarget。
-
-## 14. Bridge 能力地图
+Agent 在 Multica Issue 中交付：
 
 ```text
-                         Apple Reminders
-                    /                     \
-                   /                       \
-          Human -> Agent              Agent -> Human
-             Requests                   Attention
-                |                          ^
-                v                          |
-          Dispatch Router          Attention Policy
-                |                          |
-                +---------- Multica -------+
-                           |
-                Project / Issue / Runs
-                           |
-                 Codex / Claude / ...
+architecture.md
+review.pdf
+proposal.pptx
 ```
 
-### 已实现 v0.1
+Apple Attention：
 
-- Multica Cloud -> Apple `in_review`
-- blocked/failure attention
-- review generation
-- Apple Reminder deep link
-- Multica done/cancelled reconciliation
-- CLI profile / SQLite / EventKit / Menu Bar
+```text
+Review · Proposal package
+3 artifacts · 2 decisions required
+[Open Multica]
+```
 
-### v0.2 设计新增
+手机进入 Cloud Issue 后直接查看/下载附件。
 
-- Apple Request List intake
-- Routing List -> Multica Project + Agent
-- Generic Request + Notes override
-- New Issue dispatch
-- Continue existing Issue
-- original Request receipt + auto-complete
-- project/agent settings picker
-- request idempotency/retry
-- request cancellation-before-dispatch
+### G. Agent 失败但会自动 retry
 
-### 后续 optional
+```text
+failed -> retry active
+```
 
-- delayed dispatch
-- Multica direct private Chat target
-- macOS/iOS Shortcut for richer project/agent picker
-- share extension / Siri/App Intent
-- Direct API source/sink
+Reminder 保持 `Agent Work`，不骚扰用户。
+
+若：
+
+```text
+failed + no retry + human action required
+```
+
+移动到 `Agent Attention`。
+
+### H. Multica 原生创建的 Issue
+
+如果某 Issue 不是从 Apple 发起：
+
+```text
+Multica-created Issue
+ -> in_progress: Apple 无投影（默认）
+ -> first human Attention: Bridge 创建一条 Reminder in Agent Attention
+ -> rework: same Reminder moves to Agent Work
+ -> done: complete Reminder
+```
+
+所以 Bridge 不会把整个 Multica Board 镜像进 Apple。
+
+---
+
+## 14. 最终产品心智
+
+Apple 中不是两套互不相关的 Request / Review 票据，而是一条工作投影在不同“人的状态”之间移动：
+
+```text
+Capture     -> Agent Requests / project route
+Delegated   -> Agent Work
+Your turn   -> Agent Attention
+Finished    -> completed
+```
+
+Multica 仍然是实际 Agent Work Source of Truth。
+
+一句话：
+
+> **同一个工作项，在 Multica 里用 Issue/Run 推进；在 Apple Reminders 里用同一条 Reminder 的 List 位置表达“现在是谁的回合”。**
+
+---
+
+## 15. 参考资料
+
+### Apple
+
+- EventKit / EKReminder: https://developer.apple.com/documentation/eventkit/ekreminder
+- `EKCalendarItem.calendar` 可读写: https://developer.apple.com/documentation/eventkit/ekcalendaritem/calendar
+- `EKCalendarItem.url`: https://developer.apple.com/documentation/eventkit/ekcalendaritem/url
+- `calendarItemIdentifier` full sync 注意事项: https://developer.apple.com/documentation/eventkit/ekcalendaritem/calendaritemidentifier
+- EventKit 不提供 EKReminder subtask API（Apple DTS）: https://developer.apple.com/forums/thread/820848
+
+### Multica
+
+- Issues: https://multica.ai/docs/issues
+- Runs: https://multica.ai/docs/tasks
+- Projects: https://multica.ai/docs/projects
+- Project resources: https://multica.ai/docs/project-resources
+- Comments / attachments: https://multica.ai/docs/comments
+- Providers / session resumption: https://multica.ai/docs/providers
+- CLI: https://multica.ai/docs/cli

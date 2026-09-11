@@ -191,9 +191,9 @@ docs/
 
 ## v0.2 方向：Apple Reminders 也可以成为 Agent Request Inbox
 
-v0.1 只把 Multica 中需要人处理的工作投影到 Apple Reminders。v0.2 设计增加反方向：用户在 iPhone/Mac 的 `Agent Requests` 或项目路由 List 中创建 Reminder，Bridge 将它创建为 Multica Issue；提交成功后原 Request 自动完成并保留 receipt，后续真正需要人工 Review 时在独立 `Agent Attention` List 创建新的 Reminder。
+v0.1 只把 Multica 中需要人处理的工作投影到 Apple Reminders。v0.2 设计增加反方向，并采用“一 Issue 一 Reminder 投影”：用户在 `Agent Requests` 或项目路由 List 创建 Reminder，Bridge 将其派发为 Multica Issue 后把**同一条 Reminder**移动到 `Agent Work`；需要人工 Review/解阻时再移动到统一 `Agent Attention`，返工时移回 `Agent Work`，Multica `done/cancelled` 后才最终标记完成。这样发起与结束不会被拆成两张票据。
 
-项目/代码目录不直接写进 Reminder。Apple 侧选择 Multica Project；项目到 Git repo / local directory / daemon 的绑定继续由 Multica 管理。EventKit 没有可靠的 Reminders subtask/tag/list-group API，因此这些 UI 能力不作为 Bridge 机器契约。完整设计见 [docs/APPLE_TO_MULTICA_DISPATCH.md](docs/APPLE_TO_MULTICA_DISPATCH.md)。
+项目/代码目录不直接写进 Reminder。Apple 侧选择 Multica Project；项目到 Git repo / local directory / daemon 的绑定继续由 Multica 管理。EventKit 没有可靠的 Reminders subtask/tag/list-group API；而且 lifecycle 本身也不适合伪装成 subtask。完整设计见 [docs/APPLE_TO_MULTICA_DISPATCH.md](docs/APPLE_TO_MULTICA_DISPATCH.md)。
 
 ## License
 
