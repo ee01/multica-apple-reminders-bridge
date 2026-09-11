@@ -47,3 +47,10 @@ git log --oneline
 ```
 
 `.build/` 和 `dist/` 属于可重建产物，不放入最终 ZIP。
+
+## v0.2 design addition
+
+- `docs/APPLE_TO_MULTICA_DISPATCH.md` — Apple Reminders → Multica 主动任务发起、项目路由、继续已有 Issue 与未来 Chat continuation 设计。
+- `docs/PLAN.md` — 已加入 v0.2 implementation phases。
+
+当前可运行代码仍为 v0.1.0；v0.2 inbound dispatch 仅完成设计，尚未实现。
