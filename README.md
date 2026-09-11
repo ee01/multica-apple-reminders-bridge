@@ -181,12 +181,19 @@ docs/
 - [Verification Receipt](docs/VERIFICATION.md)
 - [Security](docs/SECURITY.md)
 - [Personal AI × Multica Integration Plan v3](docs/PERSONAL_AI_MULTICA_INTEGRATION_PLAN_V3.md)
+- [Apple Reminders → Multica Dispatch Design (v0.2)](docs/APPLE_TO_MULTICA_DISPATCH.md)
 
 ## Direct API 为什么没作为 v1 默认？
 
 `MulticaCliSource` 已经是官方 Cloud API 的受支持脚本前端，并且 CLI 自己管理登录/profile。这样 Bridge 不需要接触 PAT，也不需要绑定 REST JSON 细节。
 
 未来可以增加 `MulticaApiSource`，主要收益是减少子进程开销、精确控制 HTTP 分页/错误/重试、摆脱 CLI 安装依赖，以及在官方稳定 event/realtime API 出现后更容易改成事件驱动。它是优化 adapter，不是本项目正常工作的前置条件。
+
+## v0.2 方向：Apple Reminders 也可以成为 Agent Request Inbox
+
+v0.1 只把 Multica 中需要人处理的工作投影到 Apple Reminders。v0.2 设计增加反方向：用户在 iPhone/Mac 的 `Agent Requests` 或项目路由 List 中创建 Reminder，Bridge 将它创建为 Multica Issue；提交成功后原 Request 自动完成并保留 receipt，后续真正需要人工 Review 时在独立 `Agent Attention` List 创建新的 Reminder。
+
+项目/代码目录不直接写进 Reminder。Apple 侧选择 Multica Project；项目到 Git repo / local directory / daemon 的绑定继续由 Multica 管理。EventKit 没有可靠的 Reminders subtask/tag/list-group API，因此这些 UI 能力不作为 Bridge 机器契约。完整设计见 [docs/APPLE_TO_MULTICA_DISPATCH.md](docs/APPLE_TO_MULTICA_DISPATCH.md)。
 
 ## License
 

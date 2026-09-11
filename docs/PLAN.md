@@ -287,3 +287,70 @@ v1 可发布给个人使用前的 gate：
 ```
 
 前 3 项已在本交付环境验证。后 4 项由 `verify-macos.sh` 在目标 Mac 完成。
+
+---
+
+## 13. v0.2 设计：Apple Reminders -> Multica Dispatch
+
+v0.1 只实现 `Multica -> Apple Attention`。v0.2 计划增加 `Apple -> Multica Request`，完整设计见 [APPLE_TO_MULTICA_DISPATCH.md](APPLE_TO_MULTICA_DISPATCH.md)。
+
+推荐信息模型：
+
+```text
+Agent Requests / Agent · <Project>   human -> agent capture
+Agent Attention                      agent -> human review/unblock/failure
+```
+
+不使用 Apple Reminder subtasks、sections、list groups 或 tags 作为程序契约；EventKit 对这些 Reminders UI 能力没有完整公开 API。
+
+### Phase A — Request domain / persistence
+
+- [ ] `AgentRequestSnapshot`
+- [ ] `DispatchRoute`
+- [ ] `DispatchTarget = newIssue | continueIssue`
+- [ ] `request_projection` SQLite migration
+- [ ] payload hash / retry / restart idempotency
+
+### Phase B — EventKit Request Source
+
+- [ ] 扫描 allow-listed Request Lists
+- [ ] 忽略 Bridge 自己的 Attention List
+- [ ] 识别未完成、未消费 Request
+- [ ] managed Notes block
+- [ ] dispatch 成功后写 receipt + complete original Request
+- [ ] 派发前用户 complete -> cancel local intent
+
+### Phase C — Routing
+
+- [ ] Settings 中配置 `Apple List -> Multica Project + Agent`
+- [ ] 从 Multica 拉 Projects/Agents picker
+- [ ] Generic `Agent Requests` List
+- [ ] Notes `Project:` / `Agent:` override
+- [ ] route ambiguity fail-closed
+- [ ] 不把 local directory path 写入 Apple Reminders
+
+### Phase D — Multica Issue Dispatch
+
+- [ ] create Issue with project/assignee
+- [ ] long description via stdin
+- [ ] write issue deep link receipt
+- [ ] `Continue: MUL-xxx`
+- [ ] Multica Issue URL continuation
+- [ ] follow-up via comment/@mention rather than raw provider session id
+
+### Phase E — E2E
+
+- [ ] iPhone create Request -> iCloud -> Mac Bridge -> Multica Issue
+- [ ] Request completed receipt
+- [ ] Issue `in_review` -> independent `Agent Attention` Reminder
+- [ ] rework -> second review generation
+- [ ] project routing with local-directory resource
+- [ ] duplicate/restart/CLI-timeout does not double-create Issue
+
+### Explicitly deferred
+
+- [ ] arbitrary private Multica Chat browser/continuation (CLI is not a stable arbitrary-chat management surface)
+- [ ] Apple Reminder tags as routing contract
+- [ ] Apple subtasks/groups/sections
+- [ ] raw Codex/Claude session ID selection
+- [ ] Reminder checkbox -> Multica approval/done
