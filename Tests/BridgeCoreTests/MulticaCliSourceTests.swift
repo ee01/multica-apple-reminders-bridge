@@ -3,16 +3,19 @@ import XCTest
 
 actor RecordingRunner: CommandRunning {
     var calls: [[String]] = []
+    var timeouts: [TimeInterval] = []
     var handler: @Sendable ([String]) throws -> CommandResult
 
     init(handler: @escaping @Sendable ([String]) throws -> CommandResult) { self.handler = handler }
 
     func run(executable: String, arguments: [String], timeout: TimeInterval) async throws -> CommandResult {
         calls.append(arguments)
+        timeouts.append(timeout)
         return try handler(arguments)
     }
 
     func recordedCalls() -> [[String]] { calls }
+    func recordedTimeouts() -> [TimeInterval] { timeouts }
 }
 
 final class MulticaCliSourceTests: XCTestCase {
@@ -29,6 +32,8 @@ final class MulticaCliSourceTests: XCTestCase {
         XCTAssertFalse(calls[0].contains("daemon"))
         XCTAssertTrue(calls[0].contains("--profile"))
         XCTAssertTrue(calls[0].contains("reminders-bridge"))
+        let timeouts = await runner.recordedTimeouts()
+        XCTAssertEqual(timeouts, [300])
     }
 
     func testIssuePaginationAndWorkspaceFlag() async throws {

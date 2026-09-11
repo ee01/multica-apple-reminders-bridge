@@ -34,9 +34,10 @@ Manual macOS acceptance checks still required because TCC/iCloud cannot be valid
   1. Launch dist/Multica Reminders Bridge.app.
   2. Grant Reminders access.
   3. Click Create Test Reminder; confirm it appears in the "Multica Reviews" list and on iPhone via iCloud.
-  4. Put a Multica test issue into in_review; click Sync now.
-  5. Confirm exactly one Reminder is created and its URL opens the Multica issue.
-  6. Move issue to in_progress; sync; confirm stale review Reminder is completed.
-  7. Move issue back to in_review; sync; confirm a new review-cycle Reminder is created.
-  8. Move issue to done; sync; confirm active Reminder is completed.
+  4. With attention alarms enabled, confirm the test/new-review Reminder produces an Apple Reminders notification (subject to Focus/notification settings).
+  5. Put a Multica test issue into in_review; click Sync now.
+  6. Confirm exactly one Reminder is created and its URL opens the Multica issue.
+  7. Move issue to in_progress; sync; confirm stale review Reminder is completed.
+  8. Move issue back to in_review; sync; confirm a new review-cycle Reminder is created.
+  9. Move issue to done; sync; confirm active Reminder is completed.
 EOT

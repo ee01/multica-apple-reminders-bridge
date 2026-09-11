@@ -82,13 +82,15 @@ public struct MulticaCliSource<Runner: CommandRunning>: MulticaSource, Sendable 
     }
 
     public func login() async throws {
-        _ = try await run(["login"])
+        // Interactive browser login can legitimately take much longer than a normal
+        // read/query command. It still does not start a daemon; only the timeout differs.
+        _ = try await run(["login"], timeout: 300)
     }
 
-    private func run(_ commandArguments: [String]) async throws -> CommandResult {
+    private func run(_ commandArguments: [String], timeout: TimeInterval? = nil) async throws -> CommandResult {
         let args = commandArguments + ["--profile", configuration.multicaProfile]
         do {
-            return try await runner.run(executable: configuration.multicaCLIPath, arguments: args, timeout: commandTimeout)
+            return try await runner.run(executable: configuration.multicaCLIPath, arguments: args, timeout: timeout ?? commandTimeout)
         } catch let error as CommandRunnerError {
             let text = error.description.lowercased()
             if text.contains("login") || text.contains("auth") || text.contains("token") || text.contains("unauthorized") {
