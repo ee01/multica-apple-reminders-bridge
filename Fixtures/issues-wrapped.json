@@ -1,0 +1,14 @@
+{
+  "issues": [
+    {
+      "issue_id": "22222222-2222-2222-2222-222222222222",
+      "issue_key": "MUL-124",
+      "title": "Waiting for API credential",
+      "status_name": "blocked",
+      "priority": {"name": "urgent"},
+      "label_names": ["reminder-urgent"],
+      "assignee_name": "Claude Reviewer",
+      "updatedAt": "2026-09-11T07:10:00.123Z"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+.DS_Store
+.build/
+.swiftpm/
+*.xcuserstate
+DerivedData/
+*.app/
+*.dSYM/
+.env
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+local-config.json

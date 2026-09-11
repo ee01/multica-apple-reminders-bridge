@@ -1,0 +1,15 @@
+[
+  {
+    "id": "11111111-1111-1111-1111-111111111111",
+    "key": "MUL-123",
+    "title": "Check memory regression",
+    "status": {"name": "Code Review", "category": "in_review"},
+    "priority": "high",
+    "labels": [{"name": "backend"}],
+    "assignee": {"name": "Coding Reviewer"},
+    "project": {"name": "Personal AI"},
+    "workspace": {"slug": "personal"},
+    "updated_at": "2026-09-11T07:00:00Z",
+    "summary": "Found two potential regressions."
+  }
+]

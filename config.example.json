@@ -1,0 +1,24 @@
+{
+  "alwaysLabels" : [
+    "reminder-always"
+  ],
+  "appBaseURL" : "https://multica.ai",
+  "blockedGraceSeconds" : 600,
+  "failureRemindersEnabled" : true,
+  "issuePageSize" : 100,
+  "maxRunHydrationPerSync" : 30,
+  "multicaCLIPath" : "/opt/homebrew/bin/multica",
+  "multicaProfile" : "reminders-bridge",
+  "pollIntervalSeconds" : 180,
+  "reminderAlarmDelaySeconds" : 60,
+  "reminderAlarmEnabled" : true,
+  "reminderListName" : "Multica Reviews",
+  "suppressionLabels" : [
+    "no-reminder"
+  ],
+  "urgentLabels" : [
+    "reminder-urgent"
+  ],
+  "workspaceID" : null,
+  "workspaceSlug" : null
+}

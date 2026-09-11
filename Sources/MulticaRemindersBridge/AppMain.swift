@@ -1,0 +1,28 @@
+#if os(macOS)
+import SwiftUI
+
+@main
+struct MulticaRemindersBridgeApp: App {
+    @StateObject private var model = BridgeAppModel()
+
+    var body: some Scene {
+        MenuBarExtra("Multica Reviews", systemImage: "checklist.checked") {
+            MenuBarView(model: model)
+                .task { model.start() }
+        }
+        Settings {
+            SettingsView(model: model)
+                .task { model.start() }
+        }
+    }
+}
+#else
+import Foundation
+
+@main
+enum MulticaRemindersBridgeUnsupportedMain {
+    static func main() {
+        fputs("MulticaRemindersBridge is a macOS application. Core tests can run on this platform.\n", stderr)
+    }
+}
+#endif
