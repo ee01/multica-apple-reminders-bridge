@@ -33,6 +33,7 @@
 - `docs/PLAN.md`
 - `docs/INSTALLATION.md`
 - `docs/TESTING.md`
+- `docs/VERIFICATION.md`
 - `docs/SECURITY.md`
 - `docs/PERSONAL_AI_MULTICA_INTEGRATION_PLAN_V3.md`
 

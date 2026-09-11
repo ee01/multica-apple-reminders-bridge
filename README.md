@@ -178,6 +178,7 @@ docs/
 - [Attention Policy](docs/ATTENTION_POLICY.md)
 - [Installation](docs/INSTALLATION.md)
 - [Testing](docs/TESTING.md)
+- [Verification Receipt](docs/VERIFICATION.md)
 - [Security](docs/SECURITY.md)
 - [Personal AI × Multica Integration Plan v3](docs/PERSONAL_AI_MULTICA_INTEGRATION_PLAN_V3.md)
 
