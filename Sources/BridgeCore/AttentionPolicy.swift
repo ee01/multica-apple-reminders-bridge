@@ -57,8 +57,7 @@ public enum ReviewCycleDetector {
         // A comment can start a rework run without changing Issue status. Once that run
         // finishes and the Issue is still in_review, it is a fresh review cycle.
         if previous.latestRunStatus?.isActive == true,
-           current.latestRun?.status.isActive != true,
-           current.latestRun?.id != previous.latestRunID {
+           current.latestRun?.status.isActive != true {
             return existing + 1
         }
         return max(existing, 1)
