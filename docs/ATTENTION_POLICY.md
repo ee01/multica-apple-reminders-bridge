@@ -1,90 +1,78 @@
-# Attention Policy
+# Human Attention Policy
 
-Bridge 的核心原则：**不是 Agent 完成就提醒，而是“现在轮到人行动”才进入 `Agent Attention`。**
-
-v0.2 设计采用“一 Multica Issue -> 一 Apple Reminder 投影”。同一条 Reminder 在 `Agent Work` 与 `Agent Attention` 之间迁移，而不是每轮 Review 新建一条。
-
-## Default state machine
-
-| Issue / Run fact | Human action | Reminder action |
-|---|---:|---|
-| backlog | no | request-originated: Agent Work / otherwise none |
-| todo, no failed run needing intervention | no | Agent Work / none |
-| active queued/dispatched/running run | no | Agent Work |
-| in_progress | no | Agent Work |
-| in_review + no active run | yes | move/create Agent Attention |
-| in_review + active rework run | no | move Agent Work |
-| blocked, auto-recovery exists | usually no | Agent Work, wait grace |
-| blocked, no recovery / asks human input | yes | Agent Attention |
-| latest run failed, retry active | no | Agent Work |
-| latest run failed, no retry and issue open | yes | Agent Attention |
-| done | no | complete projection |
-| cancelled | no | complete projection |
+Bridge 的核心原则：**Agent 完成一次 Run 不等于现在轮到人；只有结构化状态表明 human action required 才创建 sibling Reminder。**
 
 ## Reconciliation precedence
 
 ```text
-explicit suppression
-    > terminal issue state
-    > active agent run
-    > in_review category
-    > blocked/failure policy
-    > semantic fallback
-    > Agent Work / no projection
+suppression
+  > terminal issue state
+  > active Agent Run
+  > in_review
+  > blocked/failure policy
+  > no human action
 ```
 
-`active agent run` 高于 stale `in_review`，用于处理用户已经在 Multica Request Changes / @Agent，但 Issue 状态尚未同步离开 Review 的窗口。
+特别是：`active Run` 高于 stale `in_review`。这样用户在 Multica Request Changes 后，旧 Review sibling 会被收尾，而不是因为 Issue 暂时还显示 `in_review` 继续提醒。
 
-## Direct Multica review
+## Rules
 
-用户不需要从 Apple Reminder 开始 Review。
+| Issue / Run | Human Action |
+|---|---|
+| backlog / todo | none |
+| active queued/dispatched/running Run | none |
+| in_progress | none |
+| in_review + no active Run | Review sibling |
+| blocked + active/recovery | wait |
+| blocked + grace expired | Unblock sibling |
+| failed + no visible recovery | Failure sibling |
+| done / cancelled | resolve active projections |
 
-如果用户直接在 Multica：
-
-- `in_review -> done`：Bridge 完成对应 Reminder；
-- `in_review -> in_progress/todo`：Bridge 移到 `Agent Work`；
-- comment/@Agent 创建 active run：即使 Issue 暂时仍为 `in_review`，Bridge 也先移到 `Agent Work`。
-
-因此 `Agent Attention` 只包含当前仍需人的事项，不应长期积压已经处理的 Review。
-
-## Overrides
-
-Suggested labels:
+## Labels
 
 ```text
-no-reminder
-reminder-urgent
-reminder-always
+no-reminder       suppress Human Action
+reminder-urgent   high priority
+reminder-always   explicit Human Action
 ```
 
-这些不是必须字段，只用于例外。
+## Review generations
+
+```text
+in_review -> Review #1
+active rework -> resolve #1
+rework completes while in_review -> Review #2
+...
+```
+
+Identity：
+
+```text
+(issue_id, human_action, generation)
+```
+
+同一 generation 幂等，不重复创建。
+
+## Alarm
+
+Main Reminder 不设置 Bridge-managed attention alarm。
+
+Human Action sibling 默认：
+
+```text
+alarm = now + reminderAlarmDelaySeconds
+```
+
+默认 60 秒，可关闭/调整。Multica due date 与“现在提醒我 Review”是两个不同概念，本版本不把 Main due date 当作 human-attention alarm。
+
+## Apple acknowledgement
+
+Apple 完成/删除 Human Action：本轮 acknowledgement/dismissal；不改 Multica。
+
+Apple 完成/删除 Main：隐藏 Main Apple projection；不改 Multica。
 
 ## No per-task prompt
 
-默认不向 Issue description 注入任何 Apple Reminder 指令。
+普通任务不读取 prompt 来决定是否提醒，也不要求 Agent 写“请创建 Apple Reminder”。
 
-不推荐：
-
-```text
-“任务完成后，如果需要人类 review，请通知 Apple Reminder。”
-```
-
-推荐：
-
-```text
-Issue/Run structured state -> AttentionPolicy -> Reminder location/state
-```
-
-## Optional semantic fallback
-
-只用于 blocked/failure 这类模糊状态：
-
-```text
-latest issue state
-+ active runs
-+ latest agent comment
-+ failure reason
--> classify human_required | machine_wait | retryable
-```
-
-此层应默认关闭，并且决策必须留下 reason receipt。
+Optional LLM semantic classifier 只可能用于未来模糊 blocked/failure reason，不属于 v0.2。

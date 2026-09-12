@@ -2,58 +2,48 @@
 
 ## Multica credentials
 
-v1 Bridge 不读取、不复制 Multica PAT。
-
 ```text
-Bridge -> multica CLI --profile reminders-bridge -> Multica Cloud
+Bridge -> official multica CLI --profile reminders-bridge -> Multica Cloud
 ```
 
-认证由官方 CLI profile 持有。Bridge 不读取 Desktop 的 `desktop-*` profile，也不读取 daemon 状态目录。
+- Bridge 不读取/复制 PAT；
+- 不读取 Desktop 的 `desktop-*` 私有 profile；
+- `config.json` / SQLite / Reminder Notes / logs 不保存 PAT；
+- Direct API adapter 若未来实现，PAT 必须存 macOS Keychain。
 
-原则：
+## No second daemon
 
-- 不把 PAT 写进 `config.json`。
-- 不把 PAT 写进 SQLite。
-- 不把 PAT 写进 Reminder notes。
-- 不把 PAT 写进日志。
-- `scripts/check-no-secrets.sh` 扫描常见 `mul_...` PAT 形态。
-- 日志层额外对 PAT-like 文本做替换脱敏。
+Bridge 只使用 `multica login / issue / project / agent ...` CLI commands，从不执行 `setup` 或 `daemon`。
 
-未来若实现 Direct API adapter，PAT 必须进入 macOS Keychain，而不是配置文件。
+## Process safety
 
-## Process execution
+Issue/comment body 通过 CLI arguments 或随机临时文件传递，不拼接 shell command。stdout/stderr 使用 file-backed capture，规避大输出 pipe deadlock。
 
-Bridge 只直接执行配置的 `multica` binary，不把 Issue 文本拼成 shell 命令；参数通过 `Process.arguments` 传入，避免 shell interpolation。
+## Apple/iCloud data minimization
 
-stdout/stderr 使用随机临时文件捕获，命令结束后删除，以避免大 JSON pipe deadlock。
+Reminder 会同步到用户 iCloud，因此只保存：
 
-## Apple data
+- Issue title/key；
+- Project/Agent display name；
+- compact status/summary；
+- durable Multica Issue deep link；
+- internal `Bridge ref` marker。
 
-Reminder 会通过用户的 Apple Reminders/iCloud 体系同步，因此 Notes 默认最小化：
-
-- Issue key
-- Agent/display name
-- Attention reason
-- compact summary
-- Multica deep link
-
-不复制完整 run transcript、repo、代码或大 Markdown。
-
-敏感 Issue 可以添加 `no-reminder`。
+不复制完整 transcript、源码、大 Markdown、token。
 
 ## Authority boundary
 
-Apple Reminder 是 projection，不是审批接口。
-
 ```text
-Apple Reminder completed/deleted
-    -> 本地 acknowledgement/dismissal
-    -> 不修改 Multica Issue
-```
+Apple Main completed/deleted
+ -> dismiss Main projection only
+ -> no Multica mutation
 
-```text
+Apple Human Action completed/deleted
+ -> acknowledge that action only
+ -> no Multica mutation
+
 Multica done/cancelled
-    -> Bridge resolves Apple Reminder
+ -> resolve Apple projections
 ```
 
-这样不会把“清掉手机提醒”误解释成“批准代码/结果”。
+这避免手机通知上的“Complete”按钮变成高责任审批/关闭 Agent 工作操作。

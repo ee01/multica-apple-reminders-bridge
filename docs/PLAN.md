@@ -1,382 +1,248 @@
-# Multica Cloud × Apple Reminders Bridge — Implementation Plan & Status
+# Multica Cloud × Apple Reminders Bridge — v0.2 Implementation Plan & Status
 
-> 日期：2026-09-11
-> 项目：`multica-apple-reminders-bridge`
+> 日期：2026-09-12
 > 部署：Multica Cloud + Web/Desktop；不 self-host
-> 版本：0.1.0
-> 状态：**v1 implementation complete；macOS/iCloud interactive acceptance pending on a real Mac**
+> 默认 Mirror Mode：`apple_origin_only`
+> 状态：**Phase A–F implemented；真实 macOS/iCloud/Cloud interactive acceptance pending**
 
-## 0. 最终范围
-
-v1 实现一个独立 macOS Menu Bar app：
+## 0. 最终目标
 
 ```text
-Multica Cloud
-  ↓
-MulticaCliSource
-  ↓
-AttentionPolicy
-  ↓
-SyncEngine + SQLite
-  ↓
-EventKitReminderSink
-  ↓
-Apple Reminders / iCloud / iPhone
+Apple Reminders                     Multica Cloud
+────────────────────────────────────────────────────────
+Project Request/Main   <--------->  Issue
+Human Action sibling  <-----------  Review / Block / Failure
+                                      |
+                                      v
+                                Desktop daemon
+                                Codex / Claude
 ```
 
-边界保持：
+设计原则：
 
-- Multica Desktop 可以继续使用；Bridge 不启动 daemon。
-- Bridge 不读取 Desktop daemon DB/profile/token。
-- Bridge 不要求每个 Issue 注入 Apple Reminder prompt。
-- Apple Reminder 是 human-attention projection，不是 Multica Review authority。
-- Personal AI 不在运行链上。
+1. Main Reminder 始终留在原 Project List；不用 List 移动表达 ownership。
+2. Review/Unblock/Failure 是独立 sibling Reminder，可单独完成。
+3. Human Action sibling 才设置近期 alarm；Main 不由 Bridge 设置提醒时间。
+4. 默认 `apple_origin_only`。
+5. Multica 是 Issue/Run 权威；Apple checkbox 不直接 mutate Multica。
+6. 用户可完全绕过 Apple、直接在 Multica Review；Bridge 必须自动 reconciliation。
 
-## 1. 已完成：工程初始化
+---
 
-- [x] Swift Package 初始化。
-- [x] macOS 14 deployment target。
-- [x] `BridgeCore` library。
-- [x] `MulticaRemindersBridge` executable/Menu Bar app。
-- [x] `CSQLite` system library。
-- [x] XCTest target。
-- [x] `.gitignore` / MIT License / Makefile。
-- [x] GitHub Actions：Ubuntu core + macOS build。
-- [x] app bundle build/install scripts。
-- [x] Git repository 初始化。
+## Phase A — Domain Model & Persistence ✅
 
-## 2. 已完成：MulticaCliSource
+已实现：
 
-实现：
+- `MirrorMode`: `apple_origin_only | all_active | attention_only`；
+- `IssueOrigin`: `apple | multica`；
+- `IssueBinding`：Issue ↔ route/project/list；
+- `ReminderProjectionKind`: `main_issue | human_action`；
+- `HumanActionKind`: review/unblock/failure/explicit；
+- `AgentRequestRecord`；
+- `ProjectRoute`；
+- SQLite v2 tables：binding / request / observation / projection；
+- v0.1 best-effort migration；
+- `apple_origin_only` 作为 config decode/init 默认值。
 
-```swift
-protocol MulticaSource {
-    func fetchIssues() async throws -> [IssueSnapshot]
-    func fetchIssue(idOrKey: String) async throws -> IssueSnapshot
-    func fetchRuns(issueIDOrKey: String) async throws -> [RunSnapshot]
-    func authStatus() async throws -> String
-    func version() async throws -> String
-}
-```
-
-完成项：
-
-- [x] 独立 `reminders-bridge` profile。
-- [x] `multica login` 连接；不执行 `setup`/`daemon`。
-- [x] `issue list --output json`。
-- [x] `issue get --output json`。
-- [x] `issue runs --output json`。
-- [x] Workspace ID override。
-- [x] Workspace list/selection。
-- [x] issue pagination。
-- [x] `--full-id`。
-- [x] permissive JSON parser，兼容 array/wrapper/nested status/labels。
-- [x] auth/workspace/command/malformed-output 错误分类。
-- [x] subprocess timeout。
-- [x] 大 JSON stdout 使用 file-backed capture，避免 pipe buffer deadlock。
-
-### 为什么 v1 仍选 CLI
-
-Bridge 不直接读取 PAT；登录和 token 生命周期由官方 CLI 负责。这样比读取 Desktop 私有 profile 更稳定，也比第一版直接绑定 REST schema 更安全。
-
-`MulticaApiSource` 保留为 future adapter，不是 v1 缺失功能。
-
-## 3. 已完成：AttentionPolicy
-
-确定性规则：
-
-| Multica state/fact | Decision |
-|---|---|
-| backlog/todo/in_progress | none |
-| in_review | create/update Reminder |
-| blocked + active Run | wait |
-| blocked + no active Run + grace expired | create/update Reminder |
-| open Issue + latest Run failed | create/update Reminder |
-| done/cancelled | resolve Reminder |
-| `no-reminder` | suppress |
-| `reminder-always` | force attention |
-| `reminder-urgent` / urgent priority | high Apple priority |
-
-- [x] status category inference。
-- [x] custom status category 优先。
-- [x] blocked grace。
-- [x] failed/no-visible-retry handling。
-- [x] label override。
-- [x] 不调用 LLM。
-- [x] 不读取 task prompt 做普通判断。
-
-## 4. 已完成：Review Cycle
-
-实现：
+Main 和 Human Action 独立持久化：
 
 ```text
-in_progress
- -> in_review     generation 1
- -> in_progress
- -> in_review     generation 2
- -> done
+MUL-381
+├─ main_issue / generation 0
+└─ human_action / generation 1..N
 ```
 
-- [x] `(issue_id, review_generation)` projection identity。
-- [x] 同一 review 不重复创建。
-- [x] rework 时自动收尾旧 Reminder。
-- [x] 再次 review 新建新 cycle Reminder。
-- [x] 用户手工完成后同 cycle 不重建。
-- [x] 用户手工删除后同 cycle 不重建。
+---
 
-## 5. 已完成：SQLite Persistence
+## Phase B — Project Projection Policy ✅
 
-表：
+Project Route：
 
 ```text
-issue_observation
-reminder_projection
-bridge_meta
+Apple List -> Multica Project -> Default Agent -> Mirror Mode
 ```
 
-完成项：
+策略：
 
-- [x] WAL。
-- [x] restart persistence。
-- [x] projection receipt。
-- [x] payload hash 幂等。
-- [x] acknowledgement/dismissal 状态。
-- [x] pending retry 状态。
-- [x] last sync metadata。
-- [x] Cloud list 不含 closed Issue 时，对 active projection 逐项 `issue get` 校准。
-- [x] Cloud transient error 不解释成 done。
+| Mode | Apple-origin Main | Multica-origin Main | Human Action |
+|---|---:|---:|---:|
+| apple_origin_only | yes | no | yes |
+| all_active | yes | yes while active | yes |
+| attention_only | no | no | yes |
 
-## 6. 已完成：EventKit Reminder Projection
+无 Project binding 时使用 `Agent Requests` fallback。
 
-实现：
+---
 
-- [x] Reminders full-access 请求。
-- [x] 查找/创建 `Multica Reviews` List。
-- [x] title/notes/url/priority/due-date 映射。
-- [x] compact summary，不复制完整 transcript/代码/Markdown。
-- [x] Multica deep link。
-- [x] 新 attention item 默认设置 absolute alarm（默认 60 秒，可配置/关闭）。
-- [x] Multica due date 与 attention alarm 分开。
-- [x] Multica done/cancelled -> Reminder complete。
-- [x] Apple Reminder completed/deleted -> 本地 ack/dismiss；不写回 Multica。
+## Phase C — Apple Request -> Multica Issue + Main ✅
 
-### EventKit identifier 恢复
+已实现：
 
-EventKit 的 local `calendarItemIdentifier` 在 full sync 后可能变化，因此实现三级恢复：
+1. EventKit 扫描 generic/project request Lists 中未被 Bridge 管理的 Reminder；
+2. List route 解析 Project + Agent；
+3. 创建 Multica Issue；
+4. assign Agent；
+5. 原 Apple Reminder receipt 被直接复用为 Main projection；
+6. Main 不移动 List、不完成；
+7. Notes/URL 更新为 Multica receipt/deep-link；
+8. request marker `Apple Bridge request: <id>` 写入 Issue description；
+9. crash recovery 先 search marker，避免重复创建；
+10. 若 Issue 已创建但 assign 尚未完成，恢复路径会补 assign；
+11. Multica Issue URL 作为 Apple-side continuation：comment existing Issue，而不是 create duplicate；
+12. 若 existing Issue 尚无 assignee，先 `assign --no-start` 绑定 route default Agent，再 add comment，避免双 Run。
 
-1. `calendarItemIdentifier`；
-2. `calendarItemExternalIdentifier`；
-3. 扫描专用 List，匹配 Notes 中 `Bridge ref: <issue>#review-<n>`。
+Main completion 并不代表 Multica completion，见 Phase F。
 
-- [x] 避免 identifier 失效导致重复 Reminder。
+---
 
-## 7. 已完成：Menu Bar / Settings / Background
+## Phase D — Project-local Human Action sibling ✅
 
-- [x] Menu Bar 状态。
-- [x] Sync now。
-- [x] Open Multica Reviews。
-- [x] Settings window。
-- [x] CLI path/profile。
-- [x] Connect Multica（只执行 `login`）。
-- [x] Workspace picker。
-- [x] Reminder permission/test。
-- [x] Reminder List name。
-- [x] poll interval。
-- [x] blocked grace。
-- [x] failure reminder toggle。
-- [x] attention alarm enable/delay。
-- [x] Run at Login (`SMAppService.mainApp`)。
-- [x] wake 后立即 sync。
-- [x] network 恢复后立即 sync。
-- [x] diagnostic log。
-
-## 8. 已完成：构建与安装脚本
-
-```bash
-make build
-make test
-make verify
-make mac-app
-make install
-```
-
-- [x] release Swift build。
-- [x] `.app` bundle assembly。
-- [x] Info.plist Reminders usage description。
-- [x] ad-hoc/default configurable codesign。
-- [x] `plutil -lint`。
-- [x] `~/Applications` install default。
-- [x] `verify-macos.sh` interactive acceptance checklist。
-
-## 9. 已完成：自动测试
-
-当前：
+当结构化状态判断“轮到人”时：
 
 ```text
-29 tests
-0 failures
+Agent · Personal AI
+○ 修复 Ask verification                 Main
+○ Review: 修复 Ask verification 🔔      Human Action sibling
 ```
 
-覆盖：policy、parser、CLI source、review cycle、SQLite、sync/reconciliation、large subprocess output、timeout、configuration backward decoding。
+已实现：
 
-详情见 `docs/TESTING.md`。
+- Review sibling；
+- blocked grace 后 Unblock sibling；
+- unrecovered failure sibling；
+- 与 Main 使用同一 `appleListName`；
+- Human Action 默认 absolute alarm；
+- Main 无 Bridge-managed alarm；
+- same cycle 幂等；
+- generation-based multi-review；
+- Multica-origin + `apple_origin_only`：不建 Main，但需要人时仍建 sibling。
 
-## 10. 仍需真实 macOS 交互验收
+---
 
-当前交付环境为 Linux，无法真实访问：
+## Phase E — Direct Multica Reconciliation ✅
 
-- AppKit/SwiftUI macOS runtime；
+用户不需要从 Apple 开始 Review。
+
+已实现优先级：
+
+```text
+terminal
+  > active Run
+  > in_review
+  > blocked/failure
+```
+
+因此：
+
+- 用户直接在 Multica Request Changes / comment-triggered rework：active Run 出现后，旧 Review sibling 自动 resolve；Main 保留；
+- 即使 Issue status 暂时仍为 `in_review`，active Run 仍优先，避免 Attention 假阳性；
+- 同一 rework Run 完成且 Issue 仍 `in_review`：识别为新的 review generation；
+- Multica `done/cancelled`：Main + active Human Actions 一起 resolve；
+- closed Issue 从 `issue list` 消失时，对 active projection 逐项 `issue get` 校准，不把查询空集错误解释为完成。
+
+---
+
+## Phase F — Apple Completion Semantics ✅
+
+### Main
+
+用户完成或删除 Main：
+
+```text
+mainProjectionDismissed = true
+projection = acknowledged
+```
+
+Bridge 不再重建该 Main，但**不会写 Multica Issue done/cancelled**。
+
+如果 Issue 后续需要人：Human Action sibling 仍正常创建。
+
+### Human Action
+
+用户完成或删除 Review/Unblock/Failure sibling：
+
+```text
+acknowledge this human-action cycle only
+```
+
+不修改 Multica Issue。
+
+同一 cycle 不重建；发生真实 rework + 新 delivery 后创建下一 generation。
+
+### Settings UI
+
+已实现：
+
+- Generic request list；
+- default Mirror Mode（默认 apple_origin_only）；
+- fallback Project / Agent；
+- Project Route CRUD；
+- route-level mirror mode；
+- Workspace/project/agent catalog；
+- Reminders permission/test；
+- Human Action alarm；
+- poll/grace/failure；
+- Run at Login。
+
+---
+
+## 测试矩阵
+
+自动测试覆盖至少包括：
+
+- config backward compatibility + default mirror mode；
+- project policy 三种 mode；
+- Apple Request dispatch；
+- original Reminder -> Main；
+- URL continuation；
+- create crash idempotency；
+- recovered assignment；
+- Main + Review sibling；
+- Multica-origin human-only default；
+- all_active；
+- blocked/failure；
+- direct Multica rework；
+- stale in_review + active Run；
+- second review generation；
+- Multica done；
+- Main Apple completion/delete semantics；
+- Human Action acknowledgement semantics；
+- SQLite restart；
+- closed-list recovery；
+- CLI login never starts daemon；
+- pagination/parser/process timeout/large output。
+
+最终数量与命令结果见 [VERIFICATION.md](VERIFICATION.md)。
+
+---
+
+## 仍需真实 macOS 验收
+
+当前交付环境不是用户的真实 Mac/iCloud/Multica Cloud，因此不能伪报：
+
 - EventKit TCC permission；
-- 用户 iCloud Reminders；
-- 用户 Multica Cloud account/profile；
-- iPhone push notification；
-- SMAppService login item runtime。
+- iCloud Reminders 实际同步；
+- iPhone alarm notification；
+-真实 Multica CLI create/assign/comment 项目流；
+- SwiftUI Settings 真实交互；
+- `SMAppService` login item。
 
-因此以下不是“代码待实现”，而是**环境依赖的最终验收**：
-
-- [ ] `make mac-app` 在用户 Mac 编译通过。
-- [ ] Reminders 权限授权。
-- [ ] Test Reminder 创建并同步 iPhone。
-- [ ] absolute alarm 在 iPhone 产生 Reminders notification。
-- [ ] 真实 Multica `in_review` 唯一投影。
-- [ ] deep link 打开正确 Issue。
-- [ ] rework/re-review/done 真实状态流验证。
-- [ ] Run at Login 验证。
-
-统一命令：
+运行：
 
 ```bash
 ./scripts/verify-macos.sh
 ```
 
-## 11. v1 明确不做 / 后续可选
-
-这些不是当前可用性的缺口：
-
-### Optional: MulticaApiSource
-
-收益：
-
-- 无需 spawn CLI；
-- 精确 HTTP retry/rate-limit/pagination；
-- 最终用户可不安装 CLI；
-- 易于未来接官方 stable event/realtime API。
-
-前提：固定并契约测试所需 REST endpoints；PAT 放 macOS Keychain。
-
-### Optional: SemanticAttentionClassifier
-
-只在 blocked/input-required 的结构化字段不足时考虑。默认关闭，不应成为普通 review 判断主路径。
-
-### Optional: explicit mobile review actions
-
-未来可做“Open / Approve / Request changes”的 Shortcut/deep link，但不能把 Reminders checkbox 直接映射为 Multica done。
-
-## 12. Release Gate
-
-v1 可发布给个人使用前的 gate：
-
-```text
-[x] core tests green
-[x] secret scan green
-[x] Git history initialized
-[ ] real Mac app build green
-[ ] EventKit permission green
-[ ] iCloud test Reminder green
-[ ] real Multica in_review E2E green
-```
-
-前 3 项已在本交付环境验证。后 4 项由 `verify-macos.sh` 在目标 Mac 完成。
-
 ---
 
-## 13. v0.2 设计：Apple Reminders <-> Multica 双向工作投影
+## 不在 v0.2 的范围
 
-v0.1 只实现 `Multica -> Apple Attention`。v0.2 计划增加 `Apple -> Multica Request`，并把旧的“Request 完成后另建 Attention Reminder”设计改为：
+- Apple Reminders assignee / Assigned to Me（EventKit 无稳定写接口）；
+- Reminders subtask（EventKit 无公开 parent/subtask API）；
+- UI Automation/private database workaround；
+- arbitrary Multica private Chat continuation；
+- Direct REST `MulticaApiSource`；
+- LLM Attention classifier；
+- artifact direct-link capability URL。
 
-```text
-1 Multica Issue <-> 0..1 active Apple Reminder projection
-
-Capture     -> Agent Requests / project route
-Delegated   -> Agent Work
-Your turn   -> Agent Attention
-Rework      -> Agent Work
-Finished    -> completed
-```
-
-完整设计见 [APPLE_TO_MULTICA_DISPATCH.md](APPLE_TO_MULTICA_DISPATCH.md)。
-
-不使用 Apple Reminder subtasks、sections、list groups 或 tags 作为程序契约；EventKit 对这些 Reminders UI 能力没有完整公开 API。Project-specific Request Lists 只是可选快捷路由，不是“一 Project 必须一个 List”。
-
-### Phase A — Projection domain / persistence
-
-- [ ] `AgentRequestSnapshot`
-- [ ] `DispatchRoute`
-- [ ] `DispatchTarget = newIssue | continueIssue`
-- [ ] SQLite 从 review-cycle projection 迁移到 issue-bound projection
-- [ ] `issue_id -> reminder bridge_ref` 唯一映射
-- [ ] 保存 source request list / current list role / attention reason
-- [ ] payload hash / retry / restart idempotency
-
-### Phase B — EventKit Request + State Movement
-
-- [ ] 扫描 allow-listed Request Lists
-- [ ] 创建/查找 `Agent Work` 与 `Agent Attention`
-- [ ] dispatch 成功后移动**同一条 Reminder**到 `Agent Work`，不标完成
-- [ ] `in_review / human-blocked` 时移动同一条 Reminder 到 `Agent Attention`
-- [ ] active rework Run / issue leaves review 时移回 `Agent Work`
-- [ ] `done/cancelled` 才最终 mark completed
-- [ ] EventKit identifier full-sync 恢复继续使用 Bridge ref
-- [ ] 派发前用户 complete -> cancel local intent
-
-### Phase C — Routing
-
-- [ ] Settings 中配置 `Apple List -> Multica Project + Agent`
-- [ ] 从 Multica 拉 Projects/Agents picker
-- [ ] Generic `Agent Requests` List + default route
-- [ ] 高频 Project 可 `Pin to Reminders` 建 Route List
-- [ ] 不自动镜像所有 Multica Project 为 Apple List
-- [ ] route ambiguity fail-closed
-- [ ] 不把 local directory path 写入 Apple Reminders；只绑定 Multica Project
-
-### Phase D — Multica Issue Dispatch / Continuation
-
-- [ ] create Issue with project/assignee
-- [ ] long description via stdin
-- [ ] issue deep link receipt
-- [ ] Multica Issue URL 作为主要 continuation contract
-- [ ] `Continue: MUL-xxx` 仅保留高级/调试兼容
-- [ ] follow-up via comment/@mention rather than raw provider session id
-- [ ] active Run 状态优先于 stale in_review，用于直接在 Multica Request Changes 的 reconciliation
-
-### Phase E — Artifact Review UX
-
-- [ ] Attention Notes 显示 artifact count/name/type + compact result summary
-- [ ] Reminder 主 URL 默认指向 durable Multica Issue deep link
-- [ ] Markdown 主要在 Multica rendered result/comment 中查看
-- [ ] PDF/PPT/Office attachment 从 Multica Issue 打开/下载
-- [ ] 不依赖 EventKit attachment/subtask API
-- [ ] 不把短时 signed download URL 存为长期 Reminder 主 URL
-- [ ] 可选 future `Open Primary Artifact`（Direct API / companion UI）
-
-### Phase F — E2E
-
-- [ ] iPhone create Request -> iCloud -> Mac Bridge -> Multica Issue
-- [ ] same Reminder: Request -> Agent Work
-- [ ] Issue `in_review` -> same Reminder -> Agent Attention
-- [ ] 用户直接在 Multica Request Changes -> active Run -> Reminder 回 Agent Work
-- [ ] 第二轮 `in_review` -> same Reminder 再回 Agent Attention
-- [ ] Multica `done` -> same Reminder completed
-- [ ] project routing with local-directory resource
-- [ ] Issue URL continuation 不创建第二个 Issue
-- [ ] duplicate/restart/CLI-timeout does not double-create Issue
-
-### Explicitly deferred
-
-- [ ] arbitrary private Multica Chat browser/continuation（CLI 不是稳定 arbitrary-chat management surface）
-- [ ] Apple Reminder tags as routing contract
-- [ ] Apple subtasks/groups/sections
-- [ ] raw Codex/Claude session ID selection
-- [ ] Reminder checkbox -> Multica approval/done
-- [ ] 直接把 Agent attachment 二进制塞进 EKReminder
-
+这些都不影响 Phase A–F 的完整工作流。

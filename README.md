@@ -1,199 +1,199 @@
 # Multica Apple Reminders Bridge
 
-一个独立的 macOS Menu Bar 应用：把 **Multica Cloud 中真正轮到人处理的 Agent 工作**投影到 Apple Reminders。
+一个独立的 macOS Menu Bar 应用，在 **Multica Cloud** 与 **Apple Reminders** 之间建立双向工作流：
 
-- 不 self-host Multica。
-- 可继续使用 Multica Desktop；Bridge 不启动第二个 daemon。
-- 不读取 Desktop daemon 的数据库或私有 token/profile。
-- 不要求每个 Multica Issue 写“完成后提醒我”的 prompt。
-- 不依赖 Personal AI；Personal AI × Multica v3 方案仅作为附带架构参考。
+- 在 Apple Reminders 创建 Agent Request，Bridge 将它派发到 Multica；
+- 一个 Apple-origin Multica Issue 保留一个 **Main Reminder**，用于项目视图；
+- 当 Agent 真正需要人 Review / 解阻 / 处理失败时，Bridge 在**同一个项目 List**创建独立 **Human Action sibling Reminder**，并设置近期 alarm；
+- 用户也可以直接在 Multica Review/返工/Done，Bridge 会自动回收 Apple 侧 sibling；
+- Apple checkbox 不会直接修改 Multica Issue 状态。
 
-当前版本：`0.1.0`。
+当前版本：`0.2.0`。
 
-## 工作原理
+## 核心模型
 
 ```text
-                          Multica Cloud
-                   Issues / Runs / Status
-                    /                 \
-                   /                   \
-        execution path                attention path
-                /                         \
-               v                           v
-      Multica Desktop daemon       Multica CLI (read/query)
-               |                           ^
-         Codex / Claude Code               |
-               |                    Reminder Bridge
-               +---- results ----------> Cloud
-                                           |
-                                      AttentionPolicy
-                                           |
-                                        EventKit
-                                           |
-                                    Apple Reminders
-                                           |
-                                         iCloud
-                                           |
-                                    iPhone/iPad/Mac
+Apple Project List                       Multica
+────────────────────────────────────────────────────────────
+○ 修复 Ask verification     ───────────> MUL-381 (Main Issue)
+
+Agent working:
+○ 修复 Ask verification                 Run running
+
+Agent delivered:
+○ 修复 Ask verification                 MUL-381 in_review
+○ Review: 修复 Ask verification  🔔      Human Action sibling
+
+User requests changes in Multica:
+○ 修复 Ask verification                 new active Run
+✓ Review: 修复 Ask verification
+
+Agent delivers again:
+○ 修复 Ask verification
+✓ Review: 修复 Ask verification
+○ Review: 修复 Ask verification  🔔      Review cycle #2
+
+Multica done:
+✓ 修复 Ask verification
+✓ Review: ...
 ```
 
-Multica Desktop 的 daemon 与 Bridge 完全独立：
+**Main 与 Human Action 是不同 Reminder。**因此用户在手机通知上把 `Review: ...` 标记完成，只处理这一轮人的行动，不会误把整个 Agent Task 完成。
 
-- Desktop daemon 负责本机 Codex/Claude Code 执行，并把结果同步到 Multica Cloud。
-- Bridge 作为另一个 Cloud client，周期调用官方 Multica CLI 的 JSON 接口读取 Issue/Run 状态。
-- Bridge 根据结构化状态判断是否“轮到人”，再用 EventKit 创建/更新 Apple Reminder。
+## 默认 Mirror Mode
 
-### 使用 Desktop 会不会多一个 daemon？
+默认值按设计为：
 
-不会。Bridge 的连接按钮只执行：
+```text
+apple_origin_only
+```
+
+含义：
+
+- 从 Apple Reminders 发起的 Agent work：保留 Main Reminder；
+- 直接从 Multica 创建的 Issue：默认不镜像 Main；
+- 但任何来源的 Issue 一旦真正需要人处理，仍会在绑定 Project List（无绑定则 `Agent Requests`）产生 Human Action sibling。
+
+每个 Project Route 可以覆盖为：
+
+- `apple_origin_only` — 默认；
+- `all_active` — 该 Multica Project 的 active Issues 都维持 Main Reminder；
+- `attention_only` — 只创建 Human Action sibling，不维持 Main。
+
+## Project Route
+
+Bridge Settings 可以把常用 Apple List 绑定到 Multica Project + 默认 Agent：
+
+```text
+Apple List              Multica Project       Default Agent
+Agent · Personal AI  -> Personal AI        -> Coding Agent
+Agent · Website      -> Website            -> Frontend Agent
+Agent Requests       -> fallback/default   -> default Agent
+```
+
+Apple 侧**不保存本地代码目录**。Multica Project 自己负责 Git/local directory/daemon resource 绑定。
+
+## Apple → Multica
+
+用户在 `Agent Requests` 或绑定的 Project List 创建普通 Reminder：
+
+```text
+Agent · Personal AI
+○ 给 Ask 外部查证增加 Skip
+
+Notes:
+先补测试，再修改实现。
+```
+
+Bridge 会：
+
+1. 根据 Apple List 选择 Project Route；
+2. 创建 Multica Issue；
+3. assign 默认 Agent；
+4. 将**原 Reminder 本身**升级为 Main Reminder，不移动 List、不完成；
+5. 写入 Multica deep link 与 Bridge marker，后续不再当作新 Request 扫描。
+
+如果新 Reminder 的 URL 已指向现有 Multica Issue，则 Bridge 把它解释为 follow-up：在已有 Issue 增加 comment/必要时 assign Agent，而不是创建新 Issue。
+
+## Multica → Apple Human Action
+
+确定性 Attention Policy：
+
+```text
+active Run                       -> Agent owns turn, no Human Action
+in_review + no active Run        -> Review sibling + alarm
+blocked + grace expired          -> Unblock sibling + alarm
+failed + no visible recovery     -> Failure sibling + alarm
+done / cancelled                 -> resolve Main + Human Actions
+```
+
+特殊 label：
+
+```text
+no-reminder       suppress Human Action
+reminder-urgent   raise Apple priority
+reminder-always   force Human Action
+```
+
+不需要给每个 Issue 写“完成后创建 Apple Reminder”的 prompt。
+
+## Multica Desktop 与 Bridge daemon
+
+可以继续正常使用 Multica Desktop。
+
+Bridge 的 `Connect Multica` 只执行：
 
 ```bash
 multica login --profile reminders-bridge
 ```
 
-`login` 只建立独立 CLI 登录/profile。Bridge **从不执行** `multica setup`、`multica daemon start` 或 Desktop 的私有 daemon profile，因此不会因为安装 Bridge 多出一个 Multica runtime/daemon。
+Bridge **从不执行** `multica setup` 或 `multica daemon`。Desktop 继续管理自己的 daemon；Bridge 的 CLI profile 只是访问 Multica Cloud 的脚本客户端，因此不会因为 Bridge 再启动第二个 daemon。
 
-## 默认 Attention Policy
+## Apple checkbox 语义
 
-```text
-backlog / todo / in_progress       -> 不提醒
-in_review                          -> 创建或更新 Reminder
-blocked + 无 active run + 超过宽限 -> 创建或更新 Reminder
-open Issue + 最新 Run failed       -> 创建或更新 Reminder
-done / cancelled                   -> 完成对应 Reminder
-```
+- 完成/删除 **Main Reminder**：仅表示“不要继续在 Apple 里维持这个 Main 投影”；不会关闭 Multica Issue。以后如果该 Issue 新出现 Human Action，Bridge 仍可创建 sibling。
+- 完成/删除 **Human Action sibling**：仅 acknowledgement；不会把 Multica Issue 标记 `done`。
+- 在 Multica `done/cancelled`：Bridge 自动完成对应 Main 与未完成 Human Action。
 
-覆盖 label：
-
-```text
-no-reminder       永不投影
-reminder-urgent   提高 Apple Reminder priority
-reminder-always   即使非 review 状态也创建 Reminder
-```
-
-绝大多数任务不需要额外 prompt。只有自定义 Agent 根本不维护 Multica status lifecycle 时，才应在 Agent/Workspace 层一次性修正行为，而不是给每个任务重复 Reminder 指令。
-
-## Apple Reminder 行为
-
-Bridge 默认建立/使用 `Multica Reviews` List。新的人类注意事项会：
-
-- 生成简短 title、summary 和 Multica Issue deep link；
-- 保留 Multica Issue due date（如果存在）；
-- 默认增加一个约 60 秒后的 EventKit alarm，用于让 iPhone/iPad 真正收到提醒；
-- 不复制完整 transcript、大段代码或 Markdown；深度 Review 仍在 Multica。
-
-用户在 Apple Reminders 手工打勾/删除，只表示处理了这条个人提醒，**不会把 Multica Issue 自动改成 done**。Multica 仍是 Agent 工作的 Source of Truth。
+这是刻意的 authority boundary：Multica 是 Agent work 的 Source of Truth，Apple Reminders 是项目投影 + 人类行动入口。
 
 ## 安装
 
 前置条件：
 
-1. macOS 14+。
-2. Multica Desktop 可以照常使用。
-3. 另外安装官方 Multica CLI（Bridge 使用它查询 Cloud，不启动 daemon）。
+1. macOS 14+；
+2. Multica Desktop 可继续照常使用；
+3. 另外安装官方 Multica CLI；
 4. Xcode Command Line Tools / Swift toolchain。
-
-在项目目录运行：
 
 ```bash
 make install
 ```
 
-默认安装到：
-
-```text
-~/Applications/Multica Reminders Bridge.app
-```
-
 首次启动：
 
-1. 打开 Settings。
-2. 点击 **Connect Multica**。
-3. 浏览器完成 Multica 登录；Bridge 使用独立 `reminders-bridge` profile。
-4. 选择 Workspace。
-5. 点击 **Grant / Check Permission** 允许 Reminders。
-6. 点击 **Create Test Reminder** 验证 iCloud/iPhone。
-7. 可开启 **Run at Login**。
+1. Settings → **Connect Multica**；
+2. 浏览器登录，建立独立 `reminders-bridge` profile；
+3. 选择 Workspace；
+4. Refresh Projects / Agents；
+5. 配置 fallback Agent，以及需要的 Project Routes；
+6. Grant Reminders Permission；
+7. Create Test Reminder；
+8. 可开启 Run at Login。
 
-更详细步骤见 [docs/INSTALLATION.md](docs/INSTALLATION.md)。
+详见 [docs/INSTALLATION.md](docs/INSTALLATION.md)。
 
-## 开发与验证
-
-核心模块没有 Apple framework 依赖，因此 Linux/macOS 都可运行：
+## 验证
 
 ```bash
 make verify
 ```
 
-macOS 上运行完整构建与人工验收清单：
+真实 Mac/iCloud/Multica Cloud 端到端验收：
 
 ```bash
-make mac-app
 ./scripts/verify-macos.sh
 ```
 
-本交付环境已完成：
-
-- Swift package build；
-- 28 个核心/集成测试全部通过；
-- SQLite restart persistence；
-- CLI 参数与分页/独立 profile 测试；
-- 大 stdout 子进程回归测试；
-- secret scan。
-
-由于当前构建环境不是 macOS，EventKit/TCC/iCloud、Menu Bar app bundle 和真实 Multica Cloud 登录无法在此环境完成最终真机验收；`scripts/verify-macos.sh` 已将这些步骤固化为一条 macOS 验收流程。详见 [docs/TESTING.md](docs/TESTING.md)。
-
-## 源码结构
-
-```text
-Sources/
-  BridgeCore/
-    AttentionPolicy.swift
-    BridgeDatabase.swift
-    Configuration.swift
-    Models.swift
-    MulticaCliSource.swift
-    MulticaJSONParser.swift
-    ProcessRunner.swift
-    ReminderFormatter.swift
-    SyncEngine.swift
-  MulticaRemindersBridge/
-    AppMain.swift
-    BridgeAppModel.swift
-    EventKitReminderSink.swift
-    MenuBarView.swift
-    SettingsView.swift
-  CSQLite/
-Tests/BridgeCoreTests/
-Fixtures/
-resources/Info.plist
-scripts/
-docs/
-```
+当前交付环境无法替代真实 EventKit/TCC/iCloud 登录，因此最终验证收据会明确区分自动测试与需在目标 Mac 执行的交互式 E2E。
 
 ## 文档
 
-- [Architecture / Design](docs/ARCHITECTURE.md)
-- [Implementation Plan & Status](docs/PLAN.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Phase A–F Implementation Plan](docs/PLAN.md)
+- [Apple → Multica Dispatch](docs/APPLE_TO_MULTICA_DISPATCH.md)
 - [Attention Policy](docs/ATTENTION_POLICY.md)
 - [Installation](docs/INSTALLATION.md)
 - [Testing](docs/TESTING.md)
 - [Verification Receipt](docs/VERIFICATION.md)
 - [Security](docs/SECURITY.md)
 - [Personal AI × Multica Integration Plan v3](docs/PERSONAL_AI_MULTICA_INTEGRATION_PLAN_V3.md)
-- [Apple Reminders → Multica Dispatch Design (v0.2)](docs/APPLE_TO_MULTICA_DISPATCH.md)
 
-## Direct API 为什么没作为 v1 默认？
+## Source adapters
 
-`MulticaCliSource` 已经是官方 Cloud API 的受支持脚本前端，并且 CLI 自己管理登录/profile。这样 Bridge 不需要接触 PAT，也不需要绑定 REST JSON 细节。
+`MulticaCliSource` 是 v0.2 默认：官方 CLI 管理登录/token，Bridge 不读取 Desktop 私有 token，也不直接持有 PAT。
 
-未来可以增加 `MulticaApiSource`，主要收益是减少子进程开销、精确控制 HTTP 分页/错误/重试、摆脱 CLI 安装依赖，以及在官方稳定 event/realtime API 出现后更容易改成事件驱动。它是优化 adapter，不是本项目正常工作的前置条件。
-
-## v0.2 方向：Apple Reminders 也可以成为 Agent Request Inbox
-
-v0.1 只把 Multica 中需要人处理的工作投影到 Apple Reminders。v0.2 设计增加反方向，并采用“一 Issue 一 Reminder 投影”：用户在 `Agent Requests` 或项目路由 List 创建 Reminder，Bridge 将其派发为 Multica Issue 后把**同一条 Reminder**移动到 `Agent Work`；需要人工 Review/解阻时再移动到统一 `Agent Attention`，返工时移回 `Agent Work`，Multica `done/cancelled` 后才最终标记完成。这样发起与结束不会被拆成两张票据。
-
-项目/代码目录不直接写进 Reminder。Apple 侧选择 Multica Project；项目到 Git repo / local directory / daemon 的绑定继续由 Multica 管理。EventKit 没有可靠的 Reminders subtask/tag/list-group API；而且 lifecycle 本身也不适合伪装成 subtask。完整设计见 [docs/APPLE_TO_MULTICA_DISPATCH.md](docs/APPLE_TO_MULTICA_DISPATCH.md)。
+未来仍可实现 `MulticaApiSource` 来减少 subprocess、精细控制 HTTP/retry/event，但它不是当前功能完整性的前置条件。
 
 ## License
 
