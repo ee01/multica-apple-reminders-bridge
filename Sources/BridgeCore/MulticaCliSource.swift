@@ -123,6 +123,12 @@ public struct MulticaCliSource<Runner: CommandRunning>: MulticaSource, Sendable 
         _ = try await run(args)
     }
 
+    public func assignIssueWithoutStarting(issueIDOrKey: String, agentID: String) async throws {
+        var args = ["issue", "assign", issueIDOrKey, "--to-id", agentID, "--no-start"]
+        args.append(contentsOf: workspaceArguments())
+        _ = try await run(args)
+    }
+
     public func addComment(issueIDOrKey: String, content: String) async throws {
         let file = try makeTemporaryTextFile(contents: content)
         defer { try? FileManager.default.removeItem(at: file) }

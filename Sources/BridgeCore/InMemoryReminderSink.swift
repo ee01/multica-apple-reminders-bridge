@@ -35,7 +35,19 @@ public final class InMemoryReminderSink: ReminderSink {
     }
 
     public func scanRequests(in listNames: Set<String>) async throws -> [AgentRequestSnapshot] {
-        requests.filter { listNames.contains($0.listName) }
+        let visible = requests.filter { listNames.contains($0.listName) }
+        // Model the real EventKit contract: a scanned request already exists remotely and
+        // can be resolved in-place even when the chosen mirror mode does not keep a Main.
+        for request in visible {
+            guard let id = request.receipt.calendarItemIdentifier, records[id] == nil else { continue }
+            let item = ReminderItem(
+                issueID: "request:\(request.id)", issueKey: "REQUEST", kind: .main, generation: 0,
+                listName: request.listName, title: request.title, notes: request.notes, url: request.url,
+                priority: .normal, dueDate: request.dueDate, alarmDate: nil
+            )
+            records[id] = Stored(item: item, state: .pending, receipt: request.receipt)
+        }
+        return visible
     }
 
     public func createTestReminder(title: String, notes: String) async throws -> ReminderReceipt {

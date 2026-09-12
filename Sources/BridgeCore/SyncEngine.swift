@@ -67,7 +67,7 @@ public final class SyncEngine: @unchecked Sendable {
                    (existing.state == .dispatched || existing.state == .continued),
                    let key = existing.issueKey {
                     let issue = try await source.fetchIssue(idOrKey: key)
-                    try await ensureMainForRecoveredRequest(request, issue: issue, record: existing, now: now, summary: &summary)
+                    try await reconcileRecoveredRequestProjection(request, issue: issue, record: existing, now: now, summary: &summary)
                     continue
                 }
 
@@ -80,7 +80,10 @@ public final class SyncEngine: @unchecked Sendable {
                 if let existingRef = requestRouter.existingIssueReference(from: request.url) {
                     issue = try await source.fetchIssue(idOrKey: existingRef)
                     if issue.assigneeName == nil, let agentID = route.defaultAgentID, !agentID.isEmpty {
-                        try await source.assignIssue(issueIDOrKey: issue.key, agentID: agentID)
+                        // Assignment normally starts a run in Multica. For a continuation we
+                        // want the follow-up comment to be the single trigger, so bind the
+                        // agent without starting first and then add the comment.
+                        try await source.assignIssueWithoutStarting(issueIDOrKey: issue.key, agentID: agentID)
                     }
                     let followUp = requestBody(request, prefix: "Follow-up from Apple Reminders")
                     try await source.addComment(issueIDOrKey: issue.key, content: followUp)
@@ -100,17 +103,20 @@ public final class SyncEngine: @unchecked Sendable {
 
                 let projectRoute = projectionPolicy.routeForIssue(issue, binding: nil) ?? route
                 let targetList = projectRoute.appleListName
-                var binding = (try persistence.binding(issueID: issue.id)) ?? IssueBinding(
+                let priorBinding = try persistence.binding(issueID: issue.id)
+                var binding = priorBinding ?? IssueBinding(
                     issueID: issue.id,
                     issueKey: issue.key,
-                    origin: .apple,
+                    origin: isContinuation ? .multica : .apple,
                     routeID: projectRoute.id,
                     projectID: issue.projectID ?? projectRoute.multicaProjectID,
                     projectName: issue.projectName ?? projectRoute.multicaProjectName,
                     appleListName: targetList,
                     updatedAt: now
                 )
-                binding.origin = .apple
+                // A follow-up to a pre-existing Multica Issue does not retroactively make
+                // that Issue Apple-origin. Preserve an existing binding when available.
+                if !isContinuation { binding.origin = .apple }
                 binding.routeID = projectRoute.id
                 binding.projectID = issue.projectID ?? projectRoute.multicaProjectID
                 binding.projectName = issue.projectName ?? projectRoute.multicaProjectName
@@ -126,12 +132,19 @@ public final class SyncEngine: @unchecked Sendable {
                 record.updatedAt = now
                 try persistence.upsertRequest(record)
 
+                let plan = projectionPolicy.plan(issue: issue, binding: binding)
                 let existingMain = try persistence.projection(issueID: issue.id, kind: .mainIssue, generation: 0)
-                if existingMain == nil {
-                    try await upsertMain(issue: issue, binding: binding, existingReceipt: request.receipt, now: now, summary: &summary)
-                } else if existingMain?.receipt?.calendarItemIdentifier != request.receipt.calendarItemIdentifier {
-                    // A second Apple Reminder that continues an already-projected issue is a dispatch
-                    // action, not a second Main task. Complete that request receipt after handoff.
+                if plan.shouldMaintainMain {
+                    if existingMain == nil {
+                        try await upsertMain(issue: issue, binding: binding, existingReceipt: request.receipt, now: now, summary: &summary)
+                    } else if existingMain?.receipt?.calendarItemIdentifier != request.receipt.calendarItemIdentifier {
+                        // A second Apple Reminder that continues an already-projected issue is a dispatch
+                        // action, not a second Main task. Complete that request receipt after handoff.
+                        try await sink.resolve(request.receipt, issueKey: issue.key, kind: .mainIssue, generation: 0)
+                    }
+                } else {
+                    // In attention_only (or Multica-origin apple_origin_only continuation), the
+                    // Apple Reminder represents the delegation action itself. Complete it once handoff succeeds.
                     try await sink.resolve(request.receipt, issueKey: issue.key, kind: .mainIssue, generation: 0)
                 }
 
@@ -148,22 +161,37 @@ public final class SyncEngine: @unchecked Sendable {
         }
     }
 
-    private func ensureMainForRecoveredRequest(_ request: AgentRequestSnapshot, issue: IssueSnapshot, record: AgentRequestRecord, now: Date, summary: inout SyncSummary) async throws {
-        var binding = try persistence.binding(issueID: issue.id) ?? IssueBinding(
+    private func reconcileRecoveredRequestProjection(_ request: AgentRequestSnapshot, issue: IssueSnapshot, record: AgentRequestRecord, now: Date, summary: inout SyncSummary) async throws {
+        let route = record.routeID.flatMap { id in configuration.projectRoutes.first(where: { $0.id == id }) }
+        let priorBinding = try persistence.binding(issueID: issue.id)
+        var binding = priorBinding ?? IssueBinding(
             issueID: issue.id,
             issueKey: issue.key,
-            origin: .apple,
+            origin: record.state == .continued ? .multica : .apple,
             routeID: record.routeID,
-            projectID: issue.projectID,
-            projectName: issue.projectName,
-            appleListName: request.listName,
+            projectID: issue.projectID ?? route?.multicaProjectID,
+            projectName: issue.projectName ?? route?.multicaProjectName,
+            appleListName: route?.appleListName ?? request.listName,
             updatedAt: now
         )
-        binding.origin = .apple
+        if record.state == .dispatched { binding.origin = .apple }
+        binding.routeID = record.routeID ?? binding.routeID
+        binding.projectID = issue.projectID ?? binding.projectID
+        binding.projectName = issue.projectName ?? binding.projectName
+        binding.appleListName = route?.appleListName ?? binding.appleListName
         binding.updatedAt = now
         try persistence.upsertBinding(binding)
-        if try persistence.projection(issueID: issue.id, kind: .mainIssue, generation: 0) == nil {
-            try await upsertMain(issue: issue, binding: binding, existingReceipt: request.receipt, now: now, summary: &summary)
+
+        let plan = projectionPolicy.plan(issue: issue, binding: binding)
+        let existingMain = try persistence.projection(issueID: issue.id, kind: .mainIssue, generation: 0)
+        if plan.shouldMaintainMain {
+            if existingMain == nil {
+                try await upsertMain(issue: issue, binding: binding, existingReceipt: request.receipt, now: now, summary: &summary)
+            } else if existingMain?.receipt?.calendarItemIdentifier != request.receipt.calendarItemIdentifier {
+                try await sink.resolve(request.receipt, issueKey: issue.key, kind: .mainIssue, generation: 0)
+            }
+        } else {
+            try await sink.resolve(request.receipt, issueKey: issue.key, kind: .mainIssue, generation: 0)
         }
     }
 
@@ -251,6 +279,10 @@ public final class SyncEngine: @unchecked Sendable {
         let plan = projectionPolicy.plan(issue: issue, binding: currentBinding)
         if plan.shouldMaintainMain && !currentBinding.mainProjectionDismissed {
             try await reconcileMain(issue: issue, binding: currentBinding, now: now, summary: &summary)
+        } else if !plan.shouldMaintainMain {
+            // Route/mirror-mode changes are reconciled too: an active Main that is no longer
+            // eligible is completed rather than left stale in the project list.
+            try await resolveProjections(issueID: issue.id, kind: .mainIssue, summary: &summary, now: now)
         }
 
         let decision = attentionPolicy.decide(issue: issue, observation: observation, now: now)

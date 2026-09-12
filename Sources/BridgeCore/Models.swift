@@ -158,7 +158,7 @@ public struct MulticaAgent: Codable, Equatable, Sendable, Identifiable {
     public init(id: String, name: String) { self.id = id; self.name = name }
 }
 
-public enum MirrorMode: String, Codable, CaseIterable, Sendable {
+public enum MirrorMode: String, Codable, CaseIterable, Hashable, Sendable {
     case allActive = "all_active"
     case appleOriginOnly = "apple_origin_only"
     case attentionOnly = "attention_only"
