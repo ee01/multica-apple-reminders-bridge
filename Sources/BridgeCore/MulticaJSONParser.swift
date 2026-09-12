@@ -57,6 +57,24 @@ public enum MulticaJSONParser {
         }
     }
 
+    public static func parseProjects(_ data: Data) throws -> [MulticaProject] {
+        let root = try json(data)
+        return try extractArray(root, preferredKeys: ["projects", "items", "data", "results"]).compactMap { raw in
+            guard let dict = raw as? [String: Any],
+                  let id = string(dict, keys: ["id", "project_id", "projectId", "uuid"]) else { return nil }
+            return MulticaProject(id: id, name: string(dict, keys: ["name", "title"]) ?? id)
+        }
+    }
+
+    public static func parseAgents(_ data: Data) throws -> [MulticaAgent] {
+        let root = try json(data)
+        return try extractArray(root, preferredKeys: ["agents", "items", "data", "results"]).compactMap { raw in
+            guard let dict = raw as? [String: Any],
+                  let id = string(dict, keys: ["id", "agent_id", "agentId", "uuid"]) else { return nil }
+            return MulticaAgent(id: id, name: string(dict, keys: ["name", "display_name", "displayName", "title"]) ?? id)
+        }
+    }
+
     private static func parseIssue(_ dict: [String: Any]) throws -> IssueSnapshot {
         guard let id = string(dict, keys: ["id", "issue_id", "issueId", "uuid"]) else {
             throw MulticaParseError.missingRequiredField("issue.id")
@@ -82,6 +100,8 @@ public enum MulticaJSONParser {
         let assigneeName = nestedActorName(dict["assignee"])
             ?? nestedActorName(dict["assigned_to"])
             ?? string(dict, keys: ["assignee_name", "assigneeName"])
+        let projectID = nestedString(dict["project"], keys: ["id", "project_id", "projectId", "uuid"])
+            ?? string(dict, keys: ["project_id", "projectId"])
         let projectName = nestedName(dict["project"]) ?? string(dict, keys: ["project_name", "projectName"])
         let workspaceSlug = nestedString(dict["workspace"], keys: ["slug"]) ?? string(dict, keys: ["workspace_slug", "workspaceSlug"])
 
@@ -103,6 +123,7 @@ public enum MulticaJSONParser {
             priority: priority,
             labels: labels,
             assigneeName: assigneeName,
+            projectID: projectID,
             projectName: projectName,
             workspaceSlug: workspaceSlug,
             updatedAt: updatedAt,
