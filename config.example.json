@@ -1,24 +1,41 @@
 {
-  "alwaysLabels" : [
+  "alwaysLabels": [
     "reminder-always"
   ],
-  "appBaseURL" : "https://multica.ai",
-  "blockedGraceSeconds" : 600,
-  "failureRemindersEnabled" : true,
-  "issuePageSize" : 100,
-  "maxRunHydrationPerSync" : 30,
-  "multicaCLIPath" : "/opt/homebrew/bin/multica",
-  "multicaProfile" : "reminders-bridge",
-  "pollIntervalSeconds" : 180,
-  "reminderAlarmDelaySeconds" : 60,
-  "reminderAlarmEnabled" : true,
-  "reminderListName" : "Multica Reviews",
-  "suppressionLabels" : [
+  "appBaseURL": "https://multica.ai",
+  "blockedGraceSeconds": 600,
+  "defaultAgentID": null,
+  "defaultAgentName": null,
+  "defaultMirrorMode": "apple_origin_only",
+  "defaultProjectID": null,
+  "defaultProjectName": null,
+  "failureRemindersEnabled": true,
+  "genericRequestListName": "Agent Requests",
+  "issuePageSize": 100,
+  "maxRunHydrationPerSync": 30,
+  "multicaCLIPath": "/opt/homebrew/bin/multica",
+  "multicaProfile": "reminders-bridge",
+  "pollIntervalSeconds": 180,
+  "projectRoutes": [
+    {
+      "appleListName": "Agent · Personal AI",
+      "defaultAgentID": "REPLACE_WITH_AGENT_UUID",
+      "defaultAgentName": "Coding Agent",
+      "id": "personal-ai",
+      "mirrorMode": "apple_origin_only",
+      "multicaProjectID": "REPLACE_WITH_PROJECT_UUID",
+      "multicaProjectName": "Personal AI"
+    }
+  ],
+  "reminderAlarmDelaySeconds": 60,
+  "reminderAlarmEnabled": true,
+  "requestDispatchEnabled": true,
+  "suppressionLabels": [
     "no-reminder"
   ],
-  "urgentLabels" : [
+  "urgentLabels": [
     "reminder-urgent"
   ],
-  "workspaceID" : null,
-  "workspaceSlug" : null
+  "workspaceID": null,
+  "workspaceSlug": null
 }

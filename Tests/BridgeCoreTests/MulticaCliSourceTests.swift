@@ -54,4 +54,24 @@ final class MulticaCliSourceTests: XCTestCase {
         XCTAssertTrue(calls[0].contains("--workspace-id"))
         XCTAssertTrue(calls[0].contains("workspace-1"))
     }
+    func testRecoveredCreatedIssueFinishesMissingAssignmentWithoutCreatingDuplicate() async throws {
+        let recovered = #"{"id":"1","key":"MUL-1","title":"Recovered","status":"todo"}"#
+        let assigned = #"{"id":"1","key":"MUL-1","title":"Recovered","status":"in_progress","assignee":{"name":"Coding Agent"}}"#
+        let runner = RecordingRunner { args in
+            if args.starts(with: ["issue", "search"]) { return CommandResult(stdout: "[\(recovered)]", stderr: "", exitCode: 0) }
+            if args.starts(with: ["issue", "assign"]) { return CommandResult(stdout: "ok", stderr: "", exitCode: 0) }
+            if args.starts(with: ["issue", "get"]) { return CommandResult(stdout: assigned, stderr: "", exitCode: 0) }
+            XCTFail("Unexpected command: \(args)")
+            return CommandResult(stdout: "", stderr: "", exitCode: 0)
+        }
+        let config = BridgeConfiguration(multicaCLIPath: "/fake/multica")
+        let source = MulticaCliSource(configuration: config, runner: runner)
+        let issue = try await source.createIssue(IssueCreateRequest(requestID: "req-1", title: "Recovered", description: "Body", projectID: nil, agentID: "agent-1", dueDate: nil))
+        XCTAssertEqual(issue.key, "MUL-1")
+        XCTAssertEqual(issue.assigneeName, "Coding Agent")
+        let calls = await runner.recordedCalls()
+        XCTAssertEqual(calls.filter { $0.starts(with: ["issue", "create"]) }.count, 0)
+        XCTAssertEqual(calls.filter { $0.starts(with: ["issue", "assign"]) }.count, 1)
+    }
+
 }

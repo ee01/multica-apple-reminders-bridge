@@ -74,7 +74,14 @@ public struct MulticaCliSource<Runner: CommandRunning>: MulticaSource, Sendable 
 
     public func createIssue(_ request: IssueCreateRequest) async throws -> IssueSnapshot {
         // Recovery first: a crash after Cloud creation but before SQLite commit must not duplicate work.
-        if let existing = try await findIssue(bridgeRequestID: request.requestID) { return existing }
+        // If creation succeeded but assignment did not, recovery also finishes the missing assignment.
+        if let existing = try await findIssue(bridgeRequestID: request.requestID) {
+            if existing.assigneeName == nil, let agentID = request.agentID, !agentID.isEmpty {
+                try await assignIssue(issueIDOrKey: existing.key, agentID: agentID)
+                return (try? await fetchIssue(idOrKey: existing.key)) ?? existing
+            }
+            return existing
+        }
 
         let marker = "Apple Bridge request: \(request.requestID)"
         let description = [request.description.trimmingCharacters(in: .whitespacesAndNewlines), "", marker]

@@ -20,8 +20,11 @@ public enum EventKitBridgeError: Error, CustomStringConvertible {
 @MainActor
 final class EventKitReminderSink: ReminderSink {
     private let store = EKEventStore()
+    private let testListName: String
 
-    init(configuration: BridgeConfiguration) {}
+    init(configuration: BridgeConfiguration) {
+        self.testListName = configuration.genericRequestListName
+    }
 
     func requestAccess() async throws -> Bool {
         let granted = try await store.requestFullAccessToReminders()
@@ -93,7 +96,7 @@ final class EventKitReminderSink: ReminderSink {
     }
 
     func createTestReminder(title: String, notes: String) async throws -> ReminderReceipt {
-        let item = ReminderItem(issueID: "bridge-test", issueKey: "BRIDGE-TEST", kind: .humanAction, generation: 1, listName: "Agent Requests", title: title, notes: notes, url: URL(string: "https://multica.ai"), priority: .normal, dueDate: nil, alarmDate: Date().addingTimeInterval(60))
+        let item = ReminderItem(issueID: "bridge-test", issueKey: "BRIDGE-TEST", kind: .humanAction, generation: 1, listName: testListName, title: title, notes: notes, url: URL(string: "https://multica.ai"), priority: .normal, dueDate: nil, alarmDate: Date().addingTimeInterval(60))
         return try await upsert(item, existing: nil)
     }
 

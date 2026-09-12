@@ -21,6 +21,8 @@ final class BridgeAppModel: ObservableObject {
     @Published var lastError: String?
     @Published var isSyncing = false
     @Published var workspaces: [WorkspaceOption] = []
+    @Published var projects: [MulticaProject] = []
+    @Published var agents: [MulticaAgent] = []
     @Published var runAtLogin = false
 
     private var pollTask: Task<Void, Never>?
@@ -114,7 +116,10 @@ final class BridgeAppModel: ObservableObject {
             let version = try await source.version()
             let auth = try await source.authStatus()
             connectionStatus = "Connected · \(version.split(separator: "\n").first.map(String.init) ?? "Multica")\n\(auth)"
-            if loadWorkspaceList { await loadWorkspaces() }
+            if loadWorkspaceList {
+                await loadWorkspaces()
+                await loadCatalog()
+            }
         } catch {
             connectionStatus = "Disconnected"
             lastError = String(describing: error)
@@ -134,10 +139,54 @@ final class BridgeAppModel: ObservableObject {
     }
 
     func selectWorkspace(_ id: String) {
+        if id.isEmpty {
+            configuration.workspaceID = nil
+            configuration.workspaceSlug = nil
+            projects = []
+            agents = []
+            saveConfiguration()
+            return
+        }
         guard let value = workspaces.first(where: { $0.id == id }) else { return }
         configuration.workspaceID = value.id
         configuration.workspaceSlug = value.slug
         saveConfiguration()
+        Task { @MainActor [weak self] in await self?.loadCatalog() }
+    }
+
+    func loadCatalog() async {
+        guard configuration.workspaceID != nil else {
+            projects = []
+            agents = []
+            return
+        }
+        do {
+            async let loadedProjects = makeCliSource().listProjects()
+            async let loadedAgents = makeCliSource().listAgents()
+            projects = try await loadedProjects.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            agents = try await loadedAgents.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            lastError = nil
+        } catch {
+            lastError = "Load Multica project/agent catalog: \(error)"
+        }
+    }
+
+    func setDefaultProject(_ id: String) {
+        configuration.defaultProjectID = id.isEmpty ? nil : id
+        configuration.defaultProjectName = projects.first(where: { $0.id == id })?.name
+    }
+
+    func setDefaultAgent(_ id: String) {
+        configuration.defaultAgentID = id.isEmpty ? nil : id
+        configuration.defaultAgentName = agents.first(where: { $0.id == id })?.name
+    }
+
+    func addProjectRoute() {
+        configuration.projectRoutes.append(ProjectRoute(appleListName: "Agent · Project", mirrorMode: configuration.defaultMirrorMode))
+    }
+
+    func removeProjectRoute(id: String) {
+        configuration.projectRoutes.removeAll { $0.id == id }
     }
 
     func refreshReminderPermission() async {
@@ -179,7 +228,7 @@ final class BridgeAppModel: ObservableObject {
             let summary = try await engine.sync()
             lastSyncSummary = summary
             lastError = summary.errors.isEmpty ? nil : summary.errors.joined(separator: "\n")
-            await BridgeLogger.shared.write("Sync fetched=\(summary.fetchedIssues) upserted=\(summary.createdOrUpdated) resolved=\(summary.resolved) errors=\(summary.errors.count)")
+            await BridgeLogger.shared.write("Sync fetched=\(summary.fetchedIssues) dispatched=\(summary.dispatchedRequests) main=\(summary.mainCreatedOrUpdated) human=\(summary.humanActionsCreatedOrUpdated) resolved=\(summary.resolved) errors=\(summary.errors.count)")
         } catch {
             lastError = String(describing: error)
             await BridgeLogger.shared.write("Sync failed: \(error)")
