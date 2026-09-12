@@ -6,7 +6,16 @@ public struct BridgeConfiguration: Codable, Equatable, Sendable {
     public var workspaceID: String?
     public var workspaceSlug: String?
     public var appBaseURL: String
-    public var reminderListName: String
+
+    public var genericRequestListName: String
+    public var projectRoutes: [ProjectRoute]
+    public var defaultMirrorMode: MirrorMode
+    public var defaultProjectID: String?
+    public var defaultProjectName: String?
+    public var defaultAgentID: String?
+    public var defaultAgentName: String?
+    public var requestDispatchEnabled: Bool
+
     public var reminderAlarmEnabled: Bool
     public var reminderAlarmDelaySeconds: TimeInterval
     public var pollIntervalSeconds: TimeInterval
@@ -24,7 +33,14 @@ public struct BridgeConfiguration: Codable, Equatable, Sendable {
         workspaceID: String? = nil,
         workspaceSlug: String? = nil,
         appBaseURL: String = "https://multica.ai",
-        reminderListName: String = "Multica Reviews",
+        genericRequestListName: String = "Agent Requests",
+        projectRoutes: [ProjectRoute] = [],
+        defaultMirrorMode: MirrorMode = .appleOriginOnly,
+        defaultProjectID: String? = nil,
+        defaultProjectName: String? = nil,
+        defaultAgentID: String? = nil,
+        defaultAgentName: String? = nil,
+        requestDispatchEnabled: Bool = true,
         reminderAlarmEnabled: Bool = true,
         reminderAlarmDelaySeconds: TimeInterval = 60,
         pollIntervalSeconds: TimeInterval = 180,
@@ -41,7 +57,14 @@ public struct BridgeConfiguration: Codable, Equatable, Sendable {
         self.workspaceID = workspaceID
         self.workspaceSlug = workspaceSlug
         self.appBaseURL = appBaseURL
-        self.reminderListName = reminderListName
+        self.genericRequestListName = genericRequestListName
+        self.projectRoutes = projectRoutes
+        self.defaultMirrorMode = defaultMirrorMode
+        self.defaultProjectID = defaultProjectID
+        self.defaultProjectName = defaultProjectName
+        self.defaultAgentID = defaultAgentID
+        self.defaultAgentName = defaultAgentName
+        self.requestDispatchEnabled = requestDispatchEnabled
         self.reminderAlarmEnabled = reminderAlarmEnabled
         self.reminderAlarmDelaySeconds = reminderAlarmDelaySeconds
         self.pollIntervalSeconds = pollIntervalSeconds
@@ -54,9 +77,38 @@ public struct BridgeConfiguration: Codable, Equatable, Sendable {
         self.alwaysLabels = alwaysLabels
     }
 
+    /// Kept only for decoding old v0.1 configuration files. New code uses project/fallback lists.
+    public var reminderListName: String { genericRequestListName }
+
+    public var requestListNames: Set<String> {
+        Set([genericRequestListName] + projectRoutes.map(\.appleListName))
+    }
+
+    public func route(forAppleList name: String) -> ProjectRoute? {
+        if let exact = projectRoutes.first(where: { $0.appleListName == name }) { return exact }
+        guard name == genericRequestListName else { return nil }
+        return ProjectRoute(
+            id: "default",
+            appleListName: genericRequestListName,
+            multicaProjectID: defaultProjectID,
+            multicaProjectName: defaultProjectName,
+            defaultAgentID: defaultAgentID,
+            defaultAgentName: defaultAgentName,
+            mirrorMode: defaultMirrorMode
+        )
+    }
+
+    public func route(for issue: IssueSnapshot) -> ProjectRoute? {
+        if let projectID = issue.projectID,
+           let route = projectRoutes.first(where: { $0.multicaProjectID == projectID }) { return route }
+        if let projectName = issue.projectName,
+           let route = projectRoutes.first(where: { $0.multicaProjectName == projectName }) { return route }
+        return nil
+    }
 
     private enum CodingKeys: String, CodingKey {
         case multicaCLIPath, multicaProfile, workspaceID, workspaceSlug, appBaseURL
+        case genericRequestListName, projectRoutes, defaultMirrorMode, defaultProjectID, defaultProjectName, defaultAgentID, defaultAgentName, requestDispatchEnabled
         case reminderListName, reminderAlarmEnabled, reminderAlarmDelaySeconds
         case pollIntervalSeconds, issuePageSize, maxRunHydrationPerSync, blockedGraceSeconds
         case failureRemindersEnabled, suppressionLabels, urgentLabels, alwaysLabels
@@ -69,7 +121,16 @@ public struct BridgeConfiguration: Codable, Equatable, Sendable {
         self.workspaceID = try c.decodeIfPresent(String.self, forKey: .workspaceID)
         self.workspaceSlug = try c.decodeIfPresent(String.self, forKey: .workspaceSlug)
         self.appBaseURL = try c.decodeIfPresent(String.self, forKey: .appBaseURL) ?? "https://multica.ai"
-        self.reminderListName = try c.decodeIfPresent(String.self, forKey: .reminderListName) ?? "Multica Reviews"
+        self.genericRequestListName = try c.decodeIfPresent(String.self, forKey: .genericRequestListName)
+            ?? c.decodeIfPresent(String.self, forKey: .reminderListName)
+            ?? "Agent Requests"
+        self.projectRoutes = try c.decodeIfPresent([ProjectRoute].self, forKey: .projectRoutes) ?? []
+        self.defaultMirrorMode = try c.decodeIfPresent(MirrorMode.self, forKey: .defaultMirrorMode) ?? .appleOriginOnly
+        self.defaultProjectID = try c.decodeIfPresent(String.self, forKey: .defaultProjectID)
+        self.defaultProjectName = try c.decodeIfPresent(String.self, forKey: .defaultProjectName)
+        self.defaultAgentID = try c.decodeIfPresent(String.self, forKey: .defaultAgentID)
+        self.defaultAgentName = try c.decodeIfPresent(String.self, forKey: .defaultAgentName)
+        self.requestDispatchEnabled = try c.decodeIfPresent(Bool.self, forKey: .requestDispatchEnabled) ?? true
         self.reminderAlarmEnabled = try c.decodeIfPresent(Bool.self, forKey: .reminderAlarmEnabled) ?? true
         self.reminderAlarmDelaySeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .reminderAlarmDelaySeconds) ?? 60
         self.pollIntervalSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .pollIntervalSeconds) ?? 180
@@ -80,6 +141,34 @@ public struct BridgeConfiguration: Codable, Equatable, Sendable {
         self.suppressionLabels = try c.decodeIfPresent(Set<String>.self, forKey: .suppressionLabels) ?? ["no-reminder"]
         self.urgentLabels = try c.decodeIfPresent(Set<String>.self, forKey: .urgentLabels) ?? ["reminder-urgent"]
         self.alwaysLabels = try c.decodeIfPresent(Set<String>.self, forKey: .alwaysLabels) ?? ["reminder-always"]
+    }
+
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(multicaCLIPath, forKey: .multicaCLIPath)
+        try c.encode(multicaProfile, forKey: .multicaProfile)
+        try c.encodeIfPresent(workspaceID, forKey: .workspaceID)
+        try c.encodeIfPresent(workspaceSlug, forKey: .workspaceSlug)
+        try c.encode(appBaseURL, forKey: .appBaseURL)
+        try c.encode(genericRequestListName, forKey: .genericRequestListName)
+        try c.encode(projectRoutes, forKey: .projectRoutes)
+        try c.encode(defaultMirrorMode, forKey: .defaultMirrorMode)
+        try c.encodeIfPresent(defaultProjectID, forKey: .defaultProjectID)
+        try c.encodeIfPresent(defaultProjectName, forKey: .defaultProjectName)
+        try c.encodeIfPresent(defaultAgentID, forKey: .defaultAgentID)
+        try c.encodeIfPresent(defaultAgentName, forKey: .defaultAgentName)
+        try c.encode(requestDispatchEnabled, forKey: .requestDispatchEnabled)
+        try c.encode(reminderAlarmEnabled, forKey: .reminderAlarmEnabled)
+        try c.encode(reminderAlarmDelaySeconds, forKey: .reminderAlarmDelaySeconds)
+        try c.encode(pollIntervalSeconds, forKey: .pollIntervalSeconds)
+        try c.encode(issuePageSize, forKey: .issuePageSize)
+        try c.encode(maxRunHydrationPerSync, forKey: .maxRunHydrationPerSync)
+        try c.encode(blockedGraceSeconds, forKey: .blockedGraceSeconds)
+        try c.encode(failureRemindersEnabled, forKey: .failureRemindersEnabled)
+        try c.encode(suppressionLabels, forKey: .suppressionLabels)
+        try c.encode(urgentLabels, forKey: .urgentLabels)
+        try c.encode(alwaysLabels, forKey: .alwaysLabels)
     }
 
     public static func load(from url: URL) throws -> BridgeConfiguration {

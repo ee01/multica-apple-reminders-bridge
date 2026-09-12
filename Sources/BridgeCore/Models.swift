@@ -11,7 +11,9 @@ public enum IssueStatusCategory: String, Codable, CaseIterable, Sendable {
     case unknown
 
     public static func infer(name: String, explicitCategory: String? = nil) -> IssueStatusCategory {
-        let candidates = [explicitCategory, name].compactMap { $0?.lowercased().replacingOccurrences(of: "-", with: "_").replacingOccurrences(of: " ", with: "_") }
+        let candidates = [explicitCategory, name].compactMap {
+            $0?.lowercased().replacingOccurrences(of: "-", with: "_").replacingOccurrences(of: " ", with: "_")
+        }
         for value in candidates {
             switch value {
             case "backlog": return .backlog
@@ -117,6 +119,7 @@ public struct IssueSnapshot: Codable, Equatable, Sendable, Identifiable {
     public let priority: IssuePriority
     public let labels: Set<String>
     public let assigneeName: String?
+    public let projectID: String?
     public let projectName: String?
     public let workspaceSlug: String?
     public let updatedAt: Date?
@@ -124,7 +127,7 @@ public struct IssueSnapshot: Codable, Equatable, Sendable, Identifiable {
     public let summary: String?
     public var latestRun: RunSnapshot?
 
-    public init(id: String, key: String, title: String, statusName: String, statusCategory: IssueStatusCategory, priority: IssuePriority = .none, labels: Set<String> = [], assigneeName: String? = nil, projectName: String? = nil, workspaceSlug: String? = nil, updatedAt: Date? = nil, dueDate: Date? = nil, summary: String? = nil, latestRun: RunSnapshot? = nil) {
+    public init(id: String, key: String, title: String, statusName: String, statusCategory: IssueStatusCategory, priority: IssuePriority = .none, labels: Set<String> = [], assigneeName: String? = nil, projectID: String? = nil, projectName: String? = nil, workspaceSlug: String? = nil, updatedAt: Date? = nil, dueDate: Date? = nil, summary: String? = nil, latestRun: RunSnapshot? = nil) {
         self.id = id
         self.key = key
         self.title = title
@@ -133,12 +136,82 @@ public struct IssueSnapshot: Codable, Equatable, Sendable, Identifiable {
         self.priority = priority
         self.labels = labels
         self.assigneeName = assigneeName
+        self.projectID = projectID
         self.projectName = projectName
         self.workspaceSlug = workspaceSlug
         self.updatedAt = updatedAt
         self.dueDate = dueDate
         self.summary = summary
         self.latestRun = latestRun
+    }
+}
+
+public struct MulticaProject: Codable, Equatable, Sendable, Identifiable {
+    public let id: String
+    public let name: String
+    public init(id: String, name: String) { self.id = id; self.name = name }
+}
+
+public struct MulticaAgent: Codable, Equatable, Sendable, Identifiable {
+    public let id: String
+    public let name: String
+    public init(id: String, name: String) { self.id = id; self.name = name }
+}
+
+public enum MirrorMode: String, Codable, CaseIterable, Sendable {
+    case allActive = "all_active"
+    case appleOriginOnly = "apple_origin_only"
+    case attentionOnly = "attention_only"
+}
+
+public struct ProjectRoute: Codable, Equatable, Sendable, Identifiable {
+    public var id: String
+    public var appleListName: String
+    public var multicaProjectID: String?
+    public var multicaProjectName: String?
+    public var defaultAgentID: String?
+    public var defaultAgentName: String?
+    public var mirrorMode: MirrorMode
+
+    public init(id: String = UUID().uuidString, appleListName: String, multicaProjectID: String? = nil, multicaProjectName: String? = nil, defaultAgentID: String? = nil, defaultAgentName: String? = nil, mirrorMode: MirrorMode = .appleOriginOnly) {
+        self.id = id
+        self.appleListName = appleListName
+        self.multicaProjectID = multicaProjectID
+        self.multicaProjectName = multicaProjectName
+        self.defaultAgentID = defaultAgentID
+        self.defaultAgentName = defaultAgentName
+        self.mirrorMode = mirrorMode
+    }
+}
+
+public enum IssueOrigin: String, Codable, Sendable {
+    case apple
+    case multica
+}
+
+public struct IssueBinding: Codable, Equatable, Sendable {
+    public let issueID: String
+    public var issueKey: String
+    public var origin: IssueOrigin
+    public var routeID: String?
+    public var projectID: String?
+    public var projectName: String?
+    public var appleListName: String
+    public var mainProjectionDismissed: Bool
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(issueID: String, issueKey: String, origin: IssueOrigin, routeID: String? = nil, projectID: String? = nil, projectName: String? = nil, appleListName: String, mainProjectionDismissed: Bool = false, createdAt: Date = Date(), updatedAt: Date = Date()) {
+        self.issueID = issueID
+        self.issueKey = issueKey
+        self.origin = origin
+        self.routeID = routeID
+        self.projectID = projectID
+        self.projectName = projectName
+        self.appleListName = appleListName
+        self.mainProjectionDismissed = mainProjectionDismissed
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 }
 
@@ -176,6 +249,18 @@ public struct AttentionDecision: Codable, Equatable, Sendable {
     }
 }
 
+public enum ReminderProjectionKind: String, Codable, Sendable {
+    case mainIssue = "main_issue"
+    case humanAction = "human_action"
+}
+
+public enum HumanActionKind: String, Codable, Sendable {
+    case review
+    case unblock
+    case failure
+    case explicit
+}
+
 public enum ReminderProjectionState: String, Codable, Sendable {
     case active
     case resolved
@@ -204,7 +289,10 @@ public struct ReminderProjection: Codable, Equatable, Sendable {
     public let id: String
     public let issueID: String
     public let issueKey: String
-    public let reviewGeneration: Int
+    public let kind: ReminderProjectionKind
+    public let generation: Int
+    public var humanActionKind: HumanActionKind?
+    public var listName: String
     public var receipt: ReminderReceipt?
     public var state: ReminderProjectionState
     public var userAcknowledged: Bool
@@ -212,11 +300,14 @@ public struct ReminderProjection: Codable, Equatable, Sendable {
     public let createdAt: Date
     public var updatedAt: Date
 
-    public init(id: String = UUID().uuidString, issueID: String, issueKey: String, reviewGeneration: Int, receipt: ReminderReceipt? = nil, state: ReminderProjectionState = .active, userAcknowledged: Bool = false, payloadHash: String? = nil, createdAt: Date = Date(), updatedAt: Date = Date()) {
+    public init(id: String = UUID().uuidString, issueID: String, issueKey: String, kind: ReminderProjectionKind, generation: Int = 0, humanActionKind: HumanActionKind? = nil, listName: String, receipt: ReminderReceipt? = nil, state: ReminderProjectionState = .active, userAcknowledged: Bool = false, payloadHash: String? = nil, createdAt: Date = Date(), updatedAt: Date = Date()) {
         self.id = id
         self.issueID = issueID
         self.issueKey = issueKey
-        self.reviewGeneration = reviewGeneration
+        self.kind = kind
+        self.generation = generation
+        self.humanActionKind = humanActionKind
+        self.listName = listName
         self.receipt = receipt
         self.state = state
         self.userAcknowledged = userAcknowledged
@@ -232,6 +323,7 @@ public struct IssueObservation: Codable, Equatable, Sendable {
     public var statusName: String
     public var statusCategory: IssueStatusCategory
     public var reviewGeneration: Int
+    public var attentionGeneration: Int
     public var latestRunID: String?
     public var latestRunStatus: RunStatus?
     public var payloadHash: String?
@@ -239,12 +331,13 @@ public struct IssueObservation: Codable, Equatable, Sendable {
     public var firstBlockedAt: Date?
     public var updatedAt: Date
 
-    public init(issueID: String, issueKey: String, statusName: String, statusCategory: IssueStatusCategory, reviewGeneration: Int = 0, latestRunID: String? = nil, latestRunStatus: RunStatus? = nil, payloadHash: String? = nil, observedUpdatedAt: Date? = nil, firstBlockedAt: Date? = nil, updatedAt: Date = Date()) {
+    public init(issueID: String, issueKey: String, statusName: String, statusCategory: IssueStatusCategory, reviewGeneration: Int = 0, attentionGeneration: Int = 0, latestRunID: String? = nil, latestRunStatus: RunStatus? = nil, payloadHash: String? = nil, observedUpdatedAt: Date? = nil, firstBlockedAt: Date? = nil, updatedAt: Date = Date()) {
         self.issueID = issueID
         self.issueKey = issueKey
         self.statusName = statusName
         self.statusCategory = statusCategory
         self.reviewGeneration = reviewGeneration
+        self.attentionGeneration = attentionGeneration
         self.latestRunID = latestRunID
         self.latestRunStatus = latestRunStatus
         self.payloadHash = payloadHash
@@ -254,35 +347,149 @@ public struct IssueObservation: Codable, Equatable, Sendable {
     }
 }
 
-public struct HumanAttentionItem: Codable, Equatable, Sendable {
+public enum ReminderItemKind: String, Codable, Sendable {
+    case main
+    case humanAction = "human_action"
+}
+
+public struct ReminderItem: Codable, Equatable, Sendable {
     public let issueID: String
     public let issueKey: String
-    public let reviewGeneration: Int
+    public let kind: ReminderItemKind
+    public let generation: Int
+    public let listName: String
     public let title: String
     public let notes: String
     public let url: URL?
     public let priority: AttentionSeverity
     public let dueDate: Date?
+    public let alarmDate: Date?
 
-    public init(issueID: String, issueKey: String, reviewGeneration: Int, title: String, notes: String, url: URL?, priority: AttentionSeverity, dueDate: Date?) {
+    public init(issueID: String, issueKey: String, kind: ReminderItemKind, generation: Int = 0, listName: String, title: String, notes: String, url: URL?, priority: AttentionSeverity = .normal, dueDate: Date? = nil, alarmDate: Date? = nil) {
         self.issueID = issueID
         self.issueKey = issueKey
-        self.reviewGeneration = reviewGeneration
+        self.kind = kind
+        self.generation = generation
+        self.listName = listName
         self.title = title
         self.notes = notes
         self.url = url
         self.priority = priority
+        self.dueDate = dueDate
+        self.alarmDate = alarmDate
+    }
+}
+
+public struct AgentRequestSnapshot: Codable, Equatable, Sendable, Identifiable {
+    public let id: String
+    public let receipt: ReminderReceipt
+    public let listName: String
+    public let title: String
+    public let notes: String
+    public let url: URL?
+    public let dueDate: Date?
+    public let priority: Int
+
+    public init(id: String, receipt: ReminderReceipt, listName: String, title: String, notes: String, url: URL?, dueDate: Date?, priority: Int = 0) {
+        self.id = id
+        self.receipt = receipt
+        self.listName = listName
+        self.title = title
+        self.notes = notes
+        self.url = url
+        self.dueDate = dueDate
+        self.priority = priority
+    }
+}
+
+public enum AgentRequestState: String, Codable, Sendable {
+    case pending
+    case dispatched
+    case continued
+    case cancelled
+    case failed
+}
+
+public struct AgentRequestRecord: Codable, Equatable, Sendable {
+    public let requestID: String
+    public var receipt: ReminderReceipt
+    public var sourceListName: String
+    public var routeID: String?
+    public var issueID: String?
+    public var issueKey: String?
+    public var state: AgentRequestState
+    public var lastError: String?
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(requestID: String, receipt: ReminderReceipt, sourceListName: String, routeID: String? = nil, issueID: String? = nil, issueKey: String? = nil, state: AgentRequestState = .pending, lastError: String? = nil, createdAt: Date = Date(), updatedAt: Date = Date()) {
+        self.requestID = requestID
+        self.receipt = receipt
+        self.sourceListName = sourceListName
+        self.routeID = routeID
+        self.issueID = issueID
+        self.issueKey = issueKey
+        self.state = state
+        self.lastError = lastError
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+public struct IssueCreateRequest: Codable, Equatable, Sendable {
+    public let title: String
+    public let description: String
+    public let projectID: String?
+    public let agentID: String?
+    public let dueDate: Date?
+
+    public init(title: String, description: String, projectID: String?, agentID: String?, dueDate: Date?) {
+        self.title = title
+        self.description = description
+        self.projectID = projectID
+        self.agentID = agentID
         self.dueDate = dueDate
     }
 }
 
 public struct SyncSummary: Codable, Equatable, Sendable {
     public var fetchedIssues: Int = 0
-    public var createdOrUpdated: Int = 0
+    public var dispatchedRequests: Int = 0
+    public var continuedRequests: Int = 0
+    public var mainCreatedOrUpdated: Int = 0
+    public var humanActionsCreatedOrUpdated: Int = 0
     public var resolved: Int = 0
     public var acknowledged: Int = 0
     public var errors: [String] = []
     public var finishedAt: Date = Date()
 
+    /// Backwards-compatible aggregate used by the v0.1 UI/logging.
+    public var createdOrUpdated: Int {
+        get { mainCreatedOrUpdated + humanActionsCreatedOrUpdated }
+        set { humanActionsCreatedOrUpdated = max(0, newValue - mainCreatedOrUpdated) }
+    }
+
     public init() {}
+}
+
+// MARK: - v0.1 source compatibility during v0.2 migration
+
+public typealias HumanAttentionItem = ReminderItem
+
+public extension ReminderItem {
+    init(issueID: String, issueKey: String, reviewGeneration: Int, title: String, notes: String, url: URL?, priority: AttentionSeverity, dueDate: Date?) {
+        self.init(issueID: issueID, issueKey: issueKey, kind: .humanAction, generation: reviewGeneration, listName: "Agent Requests", title: title, notes: notes, url: url, priority: priority, dueDate: dueDate, alarmDate: nil)
+    }
+
+    var reviewGeneration: Int { generation }
+}
+
+public extension ReminderProjection {
+    var reviewGeneration: Int { generation }
+}
+
+public extension ReminderProjection {
+    init(issueID: String, issueKey: String, reviewGeneration: Int, receipt: ReminderReceipt? = nil, state: ReminderProjectionState = .active, userAcknowledged: Bool = false, payloadHash: String? = nil, createdAt: Date = Date(), updatedAt: Date = Date()) {
+        self.init(issueID: issueID, issueKey: issueKey, kind: .humanAction, generation: reviewGeneration, humanActionKind: .review, listName: "Agent Requests", receipt: receipt, state: state, userAcknowledged: userAcknowledged, payloadHash: payloadHash, createdAt: createdAt, updatedAt: updatedAt)
+    }
 }
