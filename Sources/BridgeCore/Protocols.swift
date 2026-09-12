@@ -16,6 +16,8 @@ public protocol MulticaSource {
     func version() async throws -> String
 
     func createIssue(_ request: IssueCreateRequest) async throws -> IssueSnapshot
+    func findIssue(bridgeRequestID: String) async throws -> IssueSnapshot?
+    func assignIssue(issueIDOrKey: String, agentID: String) async throws
     func addComment(issueIDOrKey: String, content: String) async throws
     func listProjects() async throws -> [MulticaProject]
     func listAgents() async throws -> [MulticaAgent]
@@ -23,6 +25,8 @@ public protocol MulticaSource {
 
 public extension MulticaSource {
     func createIssue(_ request: IssueCreateRequest) async throws -> IssueSnapshot { throw BridgeCapabilityError.unsupported("createIssue") }
+    func findIssue(bridgeRequestID: String) async throws -> IssueSnapshot? { nil }
+    func assignIssue(issueIDOrKey: String, agentID: String) async throws { throw BridgeCapabilityError.unsupported("assignIssue") }
     func addComment(issueIDOrKey: String, content: String) async throws { throw BridgeCapabilityError.unsupported("addComment") }
     func listProjects() async throws -> [MulticaProject] { [] }
     func listAgents() async throws -> [MulticaAgent] { [] }

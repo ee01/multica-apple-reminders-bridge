@@ -34,6 +34,11 @@ public enum MulticaJSONParser {
         throw MulticaParseError.unsupportedShape(String(describing: type(of: root)))
     }
 
+
+    public static func parseSearchIssues(_ data: Data) throws -> [IssueSnapshot] {
+        try parseIssues(data)
+    }
+
     public static func parseRuns(_ data: Data) throws -> [RunSnapshot] {
         let root = try json(data)
         return try extractArray(root, preferredKeys: ["runs", "tasks", "items", "data", "results"]).compactMap { raw in

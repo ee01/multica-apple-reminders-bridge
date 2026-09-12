@@ -437,13 +437,15 @@ public struct AgentRequestRecord: Codable, Equatable, Sendable {
 }
 
 public struct IssueCreateRequest: Codable, Equatable, Sendable {
+    public let requestID: String
     public let title: String
     public let description: String
     public let projectID: String?
     public let agentID: String?
     public let dueDate: Date?
 
-    public init(title: String, description: String, projectID: String?, agentID: String?, dueDate: Date?) {
+    public init(requestID: String, title: String, description: String, projectID: String?, agentID: String?, dueDate: Date?) {
+        self.requestID = requestID
         self.title = title
         self.description = description
         self.projectID = projectID
