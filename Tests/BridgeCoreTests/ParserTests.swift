@@ -29,7 +29,8 @@ final class ParserTests: XCTestCase {
         XCTAssertEqual(values.count, 2)
         XCTAssertEqual(values[0].id, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
         XCTAssertEqual(values[0].status, .failed)
-        XCTAssertEqual(values[0].errorMessage, "agent_error")
+        XCTAssertEqual(values[0].failureReasonCode, "agent_error")
+        XCTAssertNil(values[0].errorMessage)
         XCTAssertEqual(values[0].agentName, "Claude Reviewer")
     }
 

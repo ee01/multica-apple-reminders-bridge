@@ -8,5 +8,7 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertEqual(config.multicaProfile, "bridge")
         XCTAssertTrue(config.reminderAlarmEnabled)
         XCTAssertEqual(config.reminderAlarmDelaySeconds, 60)
+        XCTAssertEqual(config.defaultMirrorMode, .appleOriginOnly)
+        XCTAssertEqual(config.reviewCompletionBehavior, .closeIssue)
     }
 }

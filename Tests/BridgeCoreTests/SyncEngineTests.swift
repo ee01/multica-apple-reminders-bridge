@@ -24,6 +24,49 @@ actor FakeMulticaSource: MulticaSource {
 
 @MainActor
 final class SyncEngineTests: XCTestCase {
+    func testSyncBootstrapsGenericAndProjectRequestLists() async throws {
+        let route = ProjectRoute(appleListName: "Agent · Personal AI", multicaProjectID: "p1")
+        let source = FakeMulticaSource()
+        let sink = InMemoryReminderSink()
+        let db = try makeDB()
+        let configuration = BridgeConfiguration(genericRequestListName: "Agent Requests", projectRoutes: [route], requestDispatchEnabled: true)
+        let engine = SyncEngine(source: source, sink: sink, persistence: db, configuration: configuration)
+
+        _ = try await engine.sync(now: Date(timeIntervalSince1970: 1000))
+
+        XCTAssertEqual(sink.ensuredLists, Set(["Agent Requests", "Agent · Personal AI"]))
+    }
+
+    func testFailedSnapshotWithQueuedRetryDoesNotCreateFailedReminder() async throws {
+        var listed = issue(.todo)
+        listed.latestRun = RunSnapshot(id: "old-failure", status: .failed, failureReasonCode: "runtime_offline")
+        let retry = RunSnapshot(id: "new-retry", status: .queued)
+        let source = FakeMulticaSource(issues: [listed], runs: ["MUL-1": [retry, listed.latestRun!]])
+        let sink = InMemoryReminderSink()
+        let db = try makeDB()
+        let engine = SyncEngine(source: source, sink: sink, persistence: db, configuration: config())
+
+        let result = try await engine.sync(now: Date(timeIntervalSince1970: 1000))
+
+        XCTAssertEqual(result.humanActionsCreatedOrUpdated, 0)
+        XCTAssertNil(try db.projection(issueID: "1", kind: .humanAction, generation: 1))
+    }
+
+    func testStaleReviewSnapshotWithActiveReworkRunDoesNotCreateReviewReminder() async throws {
+        var listed = issue(.inReview)
+        listed.latestRun = RunSnapshot(id: "delivered", status: .completed)
+        let active = RunSnapshot(id: "rework", status: .running)
+        let source = FakeMulticaSource(issues: [listed], runs: ["MUL-1": [active, listed.latestRun!]])
+        let sink = InMemoryReminderSink()
+        let db = try makeDB()
+        let engine = SyncEngine(source: source, sink: sink, persistence: db, configuration: config())
+
+        let result = try await engine.sync(now: Date(timeIntervalSince1970: 1000))
+
+        XCTAssertEqual(result.humanActionsCreatedOrUpdated, 0)
+        XCTAssertNil(try db.projection(issueID: "1", kind: .humanAction, generation: 1))
+    }
+
     func testReviewCreatesOneReminderAndDoesNotDuplicate() async throws {
         let source = FakeMulticaSource(issues: [issue(.inReview)])
         let sink = InMemoryReminderSink()
@@ -126,7 +169,7 @@ final class SyncEngineTests: XCTestCase {
     }
 
     private func config() -> BridgeConfiguration {
-        BridgeConfiguration(workspaceSlug: "personal", issuePageSize: 100, maxRunHydrationPerSync: 30, blockedGraceSeconds: 600)
+        BridgeConfiguration(workspaceSlug: "personal", issuePageSize: 100, maxRunHydrationPerSync: 30, blockedGraceSeconds: 600, reviewCompletionBehavior: .acknowledgeOnly)
     }
 
     private func makeDB() throws -> BridgeDatabase {

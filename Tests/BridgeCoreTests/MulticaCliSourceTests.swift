@@ -55,6 +55,24 @@ final class MulticaCliSourceTests: XCTestCase {
         XCTAssertTrue(calls[0].contains("workspace-1"))
     }
 
+    func testSetIssueStatusUsesOfficialStatusCommand() async throws {
+        let runner = RecordingRunner { args in
+            XCTAssertTrue(args.starts(with: ["issue", "status", "MUL-381", "done"]))
+            return CommandResult(stdout: "ok", stderr: "", exitCode: 0)
+        }
+        var config = BridgeConfiguration(multicaCLIPath: "/fake/multica", multicaProfile: "reminders-bridge")
+        config.workspaceID = "workspace-1"
+        let source = MulticaCliSource(configuration: config, runner: runner)
+
+        try await source.setIssueStatus(issueIDOrKey: "MUL-381", statusKey: "done")
+
+        let calls = await runner.recordedCalls()
+        XCTAssertEqual(calls.count, 1)
+        XCTAssertTrue(calls[0].contains("--workspace-id"))
+        XCTAssertTrue(calls[0].contains("workspace-1"))
+        XCTAssertTrue(calls[0].contains("--profile"))
+    }
+
     func testAssignWithoutStartingUsesNoStartFlag() async throws {
         let runner = RecordingRunner { args in
             XCTAssertTrue(args.starts(with: ["issue", "assign", "MUL-381", "--to-id", "agent-1", "--no-start"]))

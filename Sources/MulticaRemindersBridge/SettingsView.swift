@@ -86,7 +86,7 @@ struct SettingsView: View {
             }
 
             Section("Project Routes") {
-                Text("Pin frequently used Apple Reminder lists to Multica Projects. Main work and its Review/Unblock/Failure sibling stay in the same project list.")
+                Text("Pin frequently used Apple Reminder lists to Multica Projects. Main work and its Review/Action Required/Failed sibling stay in the same project list.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -109,12 +109,20 @@ struct SettingsView: View {
                     Spacer()
                     Text(model.reminderPermissionStatus).foregroundStyle(.secondary)
                 }
-                Toggle("Notify when a Review / Unblock / Failure Reminder is created", isOn: $model.configuration.reminderAlarmEnabled)
+                Toggle("Notify when a Review / Action Required / Failed Reminder is created", isOn: $model.configuration.reminderAlarmEnabled)
                 if model.configuration.reminderAlarmEnabled {
                     Stepper(value: $model.configuration.reminderAlarmDelaySeconds, in: 0...900, step: 30) {
                         Text("Human-action alarm after \(Int(model.configuration.reminderAlarmDelaySeconds)) seconds")
                     }
                 }
+                Picker("Completing a Review Reminder", selection: $model.configuration.reviewCompletionBehavior) {
+                    ForEach(ReviewCompletionBehavior.allCases, id: \.self) { behavior in
+                        Text(behavior.displayName).tag(behavior)
+                    }
+                }
+                Text("Close Issue (default) treats checking the current Review sibling as approval only when Multica is still in_review and no Agent run is active. Action Required and Failed remain acknowledge-only.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Text("Main Agent-work Reminders never receive Bridge-managed notification alarms. Only Human Action siblings do.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -220,6 +228,15 @@ private struct ProjectRouteEditor: View {
                     Text(mode.displayName).tag(mode)
                 }
             }
+        }
+    }
+}
+
+private extension ReviewCompletionBehavior {
+    var displayName: String {
+        switch self {
+        case .closeIssue: return "Approve and close Multica Issue (default)"
+        case .acknowledgeOnly: return "Acknowledge reminder only"
         }
     }
 }

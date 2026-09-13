@@ -34,17 +34,17 @@ public struct ReminderFormatter: Sendable {
         let prefix: String
         let actionKind: HumanActionKind
         switch decision.reason {
-        case .blockedRequiresHuman: prefix = "Unblock"; actionKind = .unblock
-        case .failedRequiresHuman: prefix = "Check failed Agent task"; actionKind = .failure
-        case .explicitAlways: prefix = "Check"; actionKind = .explicit
+        case .blockedRequiresHuman: prefix = "Action Required"; actionKind = .actionRequired
+        case .failedRequiresHuman: prefix = "Failed"; actionKind = .failed
+        case .explicitAlways: prefix = "Action Required"; actionKind = .actionRequired
         default: prefix = "Review"; actionKind = .review
         }
 
         let reasonLine: String
         switch decision.reason {
         case .reviewRequired: reasonLine = "Agent 已交付结果，等待人工 Review。"
-        case .blockedRequiresHuman: reasonLine = "任务仍被阻塞，需要人工介入。"
-        case .failedRequiresHuman: reasonLine = "最近一次 Agent Run 失败，当前没有可见的自动恢复。"
+        case .blockedRequiresHuman: reasonLine = "任务处于 Blocked，自动化不会自行继续，需要人工介入。"
+        case .failedRequiresHuman: reasonLine = "最近一次 Agent Run 已失败，且当前没有新的活动重试。"
         case .explicitAlways: reasonLine = "该任务被显式标记为需要人工关注。"
         default: reasonLine = "该任务需要人工处理。"
         }
@@ -53,7 +53,12 @@ public struct ReminderFormatter: Sendable {
         if let project = issue.projectName { lines.insert("Project: \(project)", at: 1) }
         if let agent = issue.assigneeName ?? issue.latestRun?.agentName { lines.insert("Agent: \(agent)", at: min(2, lines.count)) }
         if let summary = compact(issue.summary, max: 420), !summary.isEmpty { lines.append(""); lines.append(summary) }
-        if let run = issue.latestRun { lines.append(""); lines.append("Latest run: \(run.status.rawValue)") }
+        if let run = issue.latestRun {
+            lines.append("")
+            lines.append("Latest run: \(run.status.rawValue)")
+            if let reason = run.failureReasonCode, !reason.isEmpty { lines.append("Failure reason: \(reason)") }
+            if let error = compact(run.errorMessage, max: 300), !error.isEmpty { lines.append("Error: \(error)") }
+        }
         if generation > 1 { lines.append("Human action cycle: #\(generation)") }
 
         _ = actionKind // Kept here to make the title/reason mapping explicit; projection stores it separately.
@@ -74,9 +79,8 @@ public struct ReminderFormatter: Sendable {
 
     public func actionKind(for decision: AttentionDecision) -> HumanActionKind {
         switch decision.reason {
-        case .blockedRequiresHuman: return .unblock
-        case .failedRequiresHuman: return .failure
-        case .explicitAlways: return .explicit
+        case .blockedRequiresHuman, .explicitAlways: return .actionRequired
+        case .failedRequiresHuman: return .failed
         default: return .review
         }
     }

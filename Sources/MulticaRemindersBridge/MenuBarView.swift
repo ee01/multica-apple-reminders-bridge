@@ -15,7 +15,7 @@ struct MenuBarView: View {
                 Text("Workspace: \(workspace)").font(.caption).foregroundStyle(.secondary)
             }
             if let summary = model.lastSyncSummary {
-                Text("Last sync: \(summary.finishedAt.formatted(date: .omitted, time: .shortened)) · \(summary.createdOrUpdated) updated · \(summary.resolved) resolved")
+                Text("Last sync: \(summary.finishedAt.formatted(date: .omitted, time: .shortened)) · \(summary.createdOrUpdated) updated · \(summary.reviewApprovals) approved · \(summary.resolved) resolved")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let error = model.lastError {

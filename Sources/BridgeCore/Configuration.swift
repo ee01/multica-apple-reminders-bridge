@@ -1,5 +1,13 @@
 import Foundation
 
+public enum ReviewCompletionBehavior: String, Codable, CaseIterable, Hashable, Sendable {
+    /// Completing the Review sibling is treated as approval of the delivered Issue.
+    /// The Bridge closes the Multica Issue only after strict state guards pass.
+    case closeIssue = "close_issue"
+    /// Completing the Review sibling only acknowledges the Apple reminder.
+    case acknowledgeOnly = "acknowledge_only"
+}
+
 public struct BridgeConfiguration: Codable, Equatable, Sendable {
     public var multicaCLIPath: String
     public var multicaProfile: String
@@ -23,6 +31,7 @@ public struct BridgeConfiguration: Codable, Equatable, Sendable {
     public var maxRunHydrationPerSync: Int
     public var blockedGraceSeconds: TimeInterval
     public var failureRemindersEnabled: Bool
+    public var reviewCompletionBehavior: ReviewCompletionBehavior
     public var suppressionLabels: Set<String>
     public var urgentLabels: Set<String>
     public var alwaysLabels: Set<String>
@@ -48,6 +57,7 @@ public struct BridgeConfiguration: Codable, Equatable, Sendable {
         maxRunHydrationPerSync: Int = 30,
         blockedGraceSeconds: TimeInterval = 600,
         failureRemindersEnabled: Bool = true,
+        reviewCompletionBehavior: ReviewCompletionBehavior = .closeIssue,
         suppressionLabels: Set<String> = ["no-reminder"],
         urgentLabels: Set<String> = ["reminder-urgent"],
         alwaysLabels: Set<String> = ["reminder-always"]
@@ -72,6 +82,7 @@ public struct BridgeConfiguration: Codable, Equatable, Sendable {
         self.maxRunHydrationPerSync = maxRunHydrationPerSync
         self.blockedGraceSeconds = blockedGraceSeconds
         self.failureRemindersEnabled = failureRemindersEnabled
+        self.reviewCompletionBehavior = reviewCompletionBehavior
         self.suppressionLabels = suppressionLabels
         self.urgentLabels = urgentLabels
         self.alwaysLabels = alwaysLabels
@@ -111,7 +122,7 @@ public struct BridgeConfiguration: Codable, Equatable, Sendable {
         case genericRequestListName, projectRoutes, defaultMirrorMode, defaultProjectID, defaultProjectName, defaultAgentID, defaultAgentName, requestDispatchEnabled
         case reminderListName, reminderAlarmEnabled, reminderAlarmDelaySeconds
         case pollIntervalSeconds, issuePageSize, maxRunHydrationPerSync, blockedGraceSeconds
-        case failureRemindersEnabled, suppressionLabels, urgentLabels, alwaysLabels
+        case failureRemindersEnabled, reviewCompletionBehavior, suppressionLabels, urgentLabels, alwaysLabels
     }
 
     public init(from decoder: Decoder) throws {
@@ -138,6 +149,7 @@ public struct BridgeConfiguration: Codable, Equatable, Sendable {
         self.maxRunHydrationPerSync = try c.decodeIfPresent(Int.self, forKey: .maxRunHydrationPerSync) ?? 30
         self.blockedGraceSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .blockedGraceSeconds) ?? 600
         self.failureRemindersEnabled = try c.decodeIfPresent(Bool.self, forKey: .failureRemindersEnabled) ?? true
+        self.reviewCompletionBehavior = try c.decodeIfPresent(ReviewCompletionBehavior.self, forKey: .reviewCompletionBehavior) ?? .closeIssue
         self.suppressionLabels = try c.decodeIfPresent(Set<String>.self, forKey: .suppressionLabels) ?? ["no-reminder"]
         self.urgentLabels = try c.decodeIfPresent(Set<String>.self, forKey: .urgentLabels) ?? ["reminder-urgent"]
         self.alwaysLabels = try c.decodeIfPresent(Set<String>.self, forKey: .alwaysLabels) ?? ["reminder-always"]
@@ -166,6 +178,7 @@ public struct BridgeConfiguration: Codable, Equatable, Sendable {
         try c.encode(maxRunHydrationPerSync, forKey: .maxRunHydrationPerSync)
         try c.encode(blockedGraceSeconds, forKey: .blockedGraceSeconds)
         try c.encode(failureRemindersEnabled, forKey: .failureRemindersEnabled)
+        try c.encode(reviewCompletionBehavior, forKey: .reviewCompletionBehavior)
         try c.encode(suppressionLabels, forKey: .suppressionLabels)
         try c.encode(urgentLabels, forKey: .urgentLabels)
         try c.encode(alwaysLabels, forKey: .alwaysLabels)

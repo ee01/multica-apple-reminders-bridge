@@ -20,6 +20,7 @@ public protocol MulticaSource {
     func assignIssue(issueIDOrKey: String, agentID: String) async throws
     func assignIssueWithoutStarting(issueIDOrKey: String, agentID: String) async throws
     func addComment(issueIDOrKey: String, content: String) async throws
+    func setIssueStatus(issueIDOrKey: String, statusKey: String) async throws
     func listProjects() async throws -> [MulticaProject]
     func listAgents() async throws -> [MulticaAgent]
 }
@@ -30,6 +31,7 @@ public extension MulticaSource {
     func assignIssue(issueIDOrKey: String, agentID: String) async throws { throw BridgeCapabilityError.unsupported("assignIssue") }
     func assignIssueWithoutStarting(issueIDOrKey: String, agentID: String) async throws { try await assignIssue(issueIDOrKey: issueIDOrKey, agentID: agentID) }
     func addComment(issueIDOrKey: String, content: String) async throws { throw BridgeCapabilityError.unsupported("addComment") }
+    func setIssueStatus(issueIDOrKey: String, statusKey: String) async throws { throw BridgeCapabilityError.unsupported("setIssueStatus") }
     func listProjects() async throws -> [MulticaProject] { [] }
     func listAgents() async throws -> [MulticaAgent] { [] }
 }
@@ -37,6 +39,7 @@ public extension MulticaSource {
 @MainActor
 public protocol ReminderSink: AnyObject {
     func requestAccess() async throws -> Bool
+    func ensureLists(_ listNames: Set<String>) async throws
     func upsert(_ item: ReminderItem, existing: ReminderReceipt?) async throws -> ReminderReceipt
     func resolve(_ receipt: ReminderReceipt, issueKey: String, kind: ReminderProjectionKind, generation: Int) async throws
     func state(of receipt: ReminderReceipt, issueKey: String, kind: ReminderProjectionKind, generation: Int) async throws -> ReminderRemoteState
@@ -45,6 +48,8 @@ public protocol ReminderSink: AnyObject {
 }
 
 public extension ReminderSink {
+    func ensureLists(_ listNames: Set<String>) async throws {}
+
     func resolve(_ receipt: ReminderReceipt, issueKey: String, reviewGeneration: Int) async throws {
         try await resolve(receipt, issueKey: issueKey, kind: .humanAction, generation: reviewGeneration)
     }

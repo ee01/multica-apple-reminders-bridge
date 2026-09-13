@@ -30,6 +30,7 @@
   "reminderAlarmDelaySeconds": 60,
   "reminderAlarmEnabled": true,
   "requestDispatchEnabled": true,
+  "reviewCompletionBehavior": "close_issue",
   "suppressionLabels": [
     "no-reminder"
   ],

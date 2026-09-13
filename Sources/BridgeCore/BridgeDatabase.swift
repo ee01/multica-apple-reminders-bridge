@@ -123,6 +123,17 @@ public final class BridgeDatabase: BridgePersistence, @unchecked Sendable {
             FROM reminder_projection;
             """)
         }
+
+        // v0.3 collapses the old Unblock/Explicit variants into Action Required and
+        // renames Failure to Failed. Preserve existing projections during upgrade.
+        try exec("""
+        UPDATE reminder_projection_v2
+        SET human_action_kind='action_required'
+        WHERE human_action_kind IN ('unblock','explicit');
+        UPDATE reminder_projection_v2
+        SET human_action_kind='failed'
+        WHERE human_action_kind='failure';
+        """)
     }
 
     public func observation(issueID: String) throws -> IssueObservation? {
@@ -345,7 +356,7 @@ public final class BridgeDatabase: BridgePersistence, @unchecked Sendable {
             issueKey: text(stmt, column: 2) ?? "",
             kind: ReminderProjectionKind(rawValue: text(stmt, column: 3) ?? "human_action") ?? .humanAction,
             generation: Int(sqlite3_column_int64(stmt, 4)),
-            humanActionKind: text(stmt, column: 5).flatMap(HumanActionKind.init(rawValue:)),
+            humanActionKind: HumanActionKind.fromPersistedValue(text(stmt, column: 5)),
             listName: text(stmt, column: 6) ?? "",
             receipt: receipt,
             state: ReminderProjectionState(rawValue: text(stmt, column: 9) ?? "active") ?? .active,

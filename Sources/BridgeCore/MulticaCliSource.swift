@@ -137,6 +137,12 @@ public struct MulticaCliSource<Runner: CommandRunning>: MulticaSource, Sendable 
         _ = try await run(args)
     }
 
+    public func setIssueStatus(issueIDOrKey: String, statusKey: String) async throws {
+        var args = ["issue", "status", issueIDOrKey, statusKey]
+        args.append(contentsOf: workspaceArguments())
+        _ = try await run(args)
+    }
+
     public func listProjects() async throws -> [MulticaProject] {
         var args = ["project", "list", "--full-id", "--output", "json"]
         args.append(contentsOf: workspaceArguments())

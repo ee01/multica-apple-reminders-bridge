@@ -74,8 +74,47 @@ final class MainAndHumanSiblingTests: XCTestCase {
         _ = try await engine.sync(now: Date(timeIntervalSince1970: 1011))
 
         let human = try XCTUnwrap(db.projection(issueID: "1", kind: .humanAction, generation: 1))
-        XCTAssertEqual(human.humanActionKind, .unblock)
-        XCTAssertTrue(sink.records[human.receipt!.calendarItemIdentifier!]!.item.title.hasPrefix("Unblock:"))
+        XCTAssertEqual(human.humanActionKind, .actionRequired)
+        XCTAssertTrue(sink.records[human.receipt!.calendarItemIdentifier!]!.item.title.hasPrefix("Action Required:"))
+    }
+
+    func testFailedRunCreatesFailedSiblingWithReasonWithoutPromptContract() async throws {
+        let route = ProjectRoute(appleListName: "Agent · Personal AI", multicaProjectID: "p1")
+        let issue = IssueSnapshot(
+            id: "3", key: "MUL-3", title: "Run tests", statusName: "todo", statusCategory: .todo,
+            projectID: "p1", projectName: "Personal AI",
+            latestRun: RunSnapshot(id: "r3", status: .failed, failureReasonCode: "queued_expired", errorMessage: "runtime heartbeat expired")
+        )
+        let source = MutableIssueSource(issues: [issue])
+        let sink = InMemoryReminderSink()
+        let db = try makeDB()
+        let config = BridgeConfiguration(projectRoutes: [route], requestDispatchEnabled: false)
+        let engine = SyncEngine(source: source, sink: sink, persistence: db, configuration: config)
+
+        _ = try await engine.sync(now: Date(timeIntervalSince1970: 1000))
+
+        let human = try XCTUnwrap(db.projection(issueID: "3", kind: .humanAction, generation: 1))
+        XCTAssertEqual(human.humanActionKind, .failed)
+        let item = try XCTUnwrap(sink.records[human.receipt!.calendarItemIdentifier!]?.item)
+        XCTAssertTrue(item.title.hasPrefix("Failed:"))
+        XCTAssertTrue(item.notes.contains("queued_expired"))
+        XCTAssertTrue(item.notes.contains("runtime heartbeat expired"))
+    }
+
+    func testBlockedCreatesActionRequiredSibling() async throws {
+        let route = ProjectRoute(appleListName: "Agent · Personal AI", multicaProjectID: "p1")
+        let issue = IssueSnapshot(id: "4", key: "MUL-4", title: "Need choice", statusName: "blocked", statusCategory: .blocked, projectID: "p1")
+        let source = MutableIssueSource(issues: [issue])
+        let sink = InMemoryReminderSink()
+        let db = try makeDB()
+        let config = BridgeConfiguration(projectRoutes: [route], requestDispatchEnabled: false, blockedGraceSeconds: 0)
+        let engine = SyncEngine(source: source, sink: sink, persistence: db, configuration: config)
+
+        _ = try await engine.sync(now: Date(timeIntervalSince1970: 1000))
+
+        let human = try XCTUnwrap(db.projection(issueID: "4", kind: .humanAction, generation: 1))
+        XCTAssertEqual(human.humanActionKind, .actionRequired)
+        XCTAssertTrue(sink.records[human.receipt!.calendarItemIdentifier!]!.item.title.hasPrefix("Action Required:"))
     }
 
     private func makeDB() throws -> BridgeDatabase {
@@ -87,6 +126,7 @@ final class MainAndHumanSiblingTests: XCTestCase {
 actor MutableIssueSource: MulticaSource {
     var issues: [IssueSnapshot]
     var runs: [String: [RunSnapshot]]
+    var statusUpdates: [(String, String)] = []
     init(issues: [IssueSnapshot], runs: [String: [RunSnapshot]] = [:]) { self.issues = issues; self.runs = runs }
     func setIssues(_ values: [IssueSnapshot]) { issues = values }
     func setRuns(_ values: [RunSnapshot], for key: String) { runs[key] = values }
@@ -95,4 +135,17 @@ actor MutableIssueSource: MulticaSource {
     func fetchRuns(issueIDOrKey: String) async throws -> [RunSnapshot] { runs[issueIDOrKey] ?? [] }
     func authStatus() async throws -> String { "ok" }
     func version() async throws -> String { "test" }
+    func setIssueStatus(issueIDOrKey: String, statusKey: String) async throws {
+        statusUpdates.append((issueIDOrKey, statusKey))
+        guard let category = IssueStatusCategory(rawValue: statusKey),
+              let index = issues.firstIndex(where: { $0.id == issueIDOrKey || $0.key == issueIDOrKey }) else { return }
+        let old = issues[index]
+        issues[index] = IssueSnapshot(
+            id: old.id, key: old.key, title: old.title, statusName: statusKey, statusCategory: category,
+            priority: old.priority, labels: old.labels, assigneeName: old.assigneeName,
+            projectID: old.projectID, projectName: old.projectName, workspaceSlug: old.workspaceSlug,
+            updatedAt: old.updatedAt, dueDate: old.dueDate, summary: old.summary, latestRun: old.latestRun
+        )
+    }
+    func recordedStatusUpdates() -> [(String, String)] { statusUpdates }
 }

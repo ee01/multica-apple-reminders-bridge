@@ -27,8 +27,12 @@ public final class SyncEngine: @unchecked Sendable {
         var summary = SyncSummary()
 
         if configuration.requestDispatchEnabled {
-            do { try await dispatchAppleRequests(now: now, summary: &summary) }
-            catch { summary.errors.append("dispatch requests: \(error)") }
+            do {
+                // First-run bootstrap: users do not have to pre-create Agent Requests or
+                // project route lists manually in Reminders.app.
+                try await sink.ensureLists(configuration.requestListNames)
+                try await dispatchAppleRequests(now: now, summary: &summary)
+            } catch { summary.errors.append("dispatch requests: \(error)") }
         }
 
         var issues = try await source.fetchIssues()
@@ -209,8 +213,15 @@ public final class SyncEngine: @unchecked Sendable {
     private func hydrateLatestRuns(_ input: [IssueSnapshot], summary: inout SyncSummary) async -> [IssueSnapshot] {
         let candidates = input.enumerated().filter { _, issue in
             switch issue.statusCategory {
-            case .inReview, .blocked: return issue.latestRun == nil
-            case .todo, .inProgress: return configuration.failureRemindersEnabled && issue.latestRun == nil
+            case .inReview, .blocked:
+                // A comment can start a new run while Issue status remains stale. Refresh
+                // unless the list payload already proves an active run.
+                return issue.latestRun?.status.isActive != true
+            case .todo, .inProgress:
+                // A failed list snapshot may already have an automatic retry queued.
+                // Re-fetch Runs before generating a Failed sibling to avoid false alarms.
+                guard configuration.failureRemindersEnabled else { return false }
+                return issue.latestRun == nil || issue.latestRun?.status == .failed
             default: return false
             }
         }.sorted { lhs, rhs in
@@ -292,7 +303,14 @@ public final class SyncEngine: @unchecked Sendable {
         case .createOrUpdateReminder:
             let generation = attentionGeneration(previous: previous, current: issue, decision: decision, reviewGeneration: reviewGeneration)
             observation.attentionGeneration = generation
-            try await reconcileHumanAction(issue: issue, binding: currentBinding, decision: decision, generation: generation, now: now, summary: &summary)
+            let closedByReview = try await reconcileHumanAction(issue: issue, binding: currentBinding, decision: decision, generation: generation, now: now, summary: &summary)
+            if closedByReview {
+                observation.statusName = IssueStatusCategory.done.rawValue
+                observation.statusCategory = .done
+                observation.updatedAt = now
+                try persistence.upsertObservation(observation)
+                return
+            }
         }
 
         try persistence.upsertObservation(observation)
@@ -354,24 +372,57 @@ public final class SyncEngine: @unchecked Sendable {
         summary.mainCreatedOrUpdated += 1
     }
 
-    private func reconcileHumanAction(issue: IssueSnapshot, binding: IssueBinding, decision: AttentionDecision, generation: Int, now: Date, summary: inout SyncSummary) async throws {
+    /// Returns true when completing the current Review sibling successfully closes the
+    /// Multica Issue. Action Required / Failed siblings are always acknowledge-only.
+    private func reconcileHumanAction(issue: IssueSnapshot, binding: IssueBinding, decision: AttentionDecision, generation: Int, now: Date, summary: inout SyncSummary) async throws -> Bool {
         let item = attentionFormatter.makeItem(issue: issue, decision: decision, generation: generation, listName: binding.appleListName, now: now)
         let hash = attentionFormatter.payloadHash(item)
         var projection = try persistence.projection(issueID: issue.id, kind: .humanAction, generation: generation)
         if var existing = projection {
-            if existing.userAcknowledged || existing.state == .acknowledged || existing.state == .dismissed { return }
+            if existing.userAcknowledged || existing.state == .acknowledged || existing.state == .dismissed { return false }
             if let receipt = existing.receipt {
                 switch try await sink.state(of: receipt, issueKey: existing.issueKey, kind: .humanAction, generation: existing.generation) {
                 case .completed:
-                    existing.userAcknowledged = true; existing.state = .acknowledged; existing.updatedAt = now
-                    try persistence.upsertProjection(existing); summary.acknowledged += 1; return
+                    if shouldCloseIssueFromCompletedReview(issue: issue, projection: existing, currentGeneration: generation) {
+                        do {
+                            try await source.setIssueStatus(issueIDOrKey: issue.key, statusKey: IssueStatusCategory.done.rawValue)
+                        } catch {
+                            // The user intended to approve, but Cloud did not accept it. Re-open the
+                            // Review reminder so the failed handoff is visible instead of silently lost.
+                            _ = try? await sink.upsert(item, existing: existing.receipt)
+                            throw error
+                        }
+
+                        existing.userAcknowledged = true
+                        existing.state = .resolved
+                        existing.updatedAt = now
+                        try persistence.upsertProjection(existing)
+                        summary.reviewApprovals += 1
+
+                        // Multica is now the source of truth for completion. Mirror that result back
+                        // immediately; the next poll will verify the terminal Issue state again.
+                        try await resolveProjections(issueID: issue.id, kind: .mainIssue, summary: &summary, now: now)
+                        try await resolveProjections(issueID: issue.id, kind: .humanAction, summary: &summary, now: now)
+                        return true
+                    }
+
+                    existing.userAcknowledged = true
+                    existing.state = .acknowledged
+                    existing.updatedAt = now
+                    try persistence.upsertProjection(existing)
+                    summary.acknowledged += 1
+                    return false
                 case .missing:
-                    existing.userAcknowledged = true; existing.state = .dismissed; existing.updatedAt = now
-                    try persistence.upsertProjection(existing); summary.acknowledged += 1; return
+                    existing.userAcknowledged = true
+                    existing.state = .dismissed
+                    existing.updatedAt = now
+                    try persistence.upsertProjection(existing)
+                    summary.acknowledged += 1
+                    return false
                 case .pending: break
                 }
             }
-            if existing.payloadHash == hash, existing.state == .active { return }
+            if existing.payloadHash == hash, existing.state == .active { return false }
         }
 
         let receipt = try await sink.upsert(item, existing: projection?.receipt)
@@ -394,6 +445,23 @@ public final class SyncEngine: @unchecked Sendable {
         projection?.updatedAt = now
         if let projection { try persistence.upsertProjection(projection) }
         summary.humanActionsCreatedOrUpdated += 1
+        return false
+    }
+
+    private func shouldCloseIssueFromCompletedReview(issue: IssueSnapshot, projection: ReminderProjection, currentGeneration: Int) -> Bool {
+        guard configuration.reviewCompletionBehavior == .closeIssue else { return false }
+        guard projection.humanActionKind == .review else { return false }
+        guard projection.generation == currentGeneration else { return false }
+        guard issue.statusCategory == .inReview else { return false }
+        guard issue.latestRun?.status.isActive != true else { return false }
+
+        // Never let a Review checkbox bypass another current human gate. Under normal
+        // reconciliation there is only one active human sibling, but this makes upgrades
+        // and partial failures fail closed.
+        let otherActions = (try? persistence.activeProjections(issueID: issue.id)) ?? []
+        return !otherActions.contains { value in
+            value.kind == .humanAction && value.id != projection.id && value.humanActionKind != .review
+        }
     }
 
     private func attentionGeneration(previous: IssueObservation?, current: IssueSnapshot, decision: AttentionDecision, reviewGeneration: Int) -> Int {

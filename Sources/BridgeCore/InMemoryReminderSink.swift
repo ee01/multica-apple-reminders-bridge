@@ -11,10 +11,15 @@ public final class InMemoryReminderSink: ReminderSink {
     public private(set) var records: [String: Stored] = [:]
     public var requests: [AgentRequestSnapshot] = []
     public var accessGranted = true
+    public private(set) var ensuredLists: Set<String> = []
 
     public init() {}
 
     public func requestAccess() async throws -> Bool { accessGranted }
+
+    public func ensureLists(_ listNames: Set<String>) async throws {
+        ensuredLists.formUnion(listNames)
+    }
 
     public func upsert(_ item: ReminderItem, existing: ReminderReceipt?) async throws -> ReminderReceipt {
         let id = existing?.calendarItemIdentifier ?? UUID().uuidString

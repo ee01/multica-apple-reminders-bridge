@@ -94,16 +94,20 @@ public struct RunSnapshot: Codable, Equatable, Sendable {
     public let createdAt: Date?
     public let startedAt: Date?
     public let completedAt: Date?
+    /// Stable Multica failure reason code when available, for example
+    /// `runtime_offline`, `queued_expired`, or `agent_error.provider_quota_limit`.
+    public let failureReasonCode: String?
     public let errorMessage: String?
     public let waitReason: String?
     public let agentName: String?
 
-    public init(id: String, status: RunStatus, createdAt: Date? = nil, startedAt: Date? = nil, completedAt: Date? = nil, errorMessage: String? = nil, waitReason: String? = nil, agentName: String? = nil) {
+    public init(id: String, status: RunStatus, createdAt: Date? = nil, startedAt: Date? = nil, completedAt: Date? = nil, failureReasonCode: String? = nil, errorMessage: String? = nil, waitReason: String? = nil, agentName: String? = nil) {
         self.id = id
         self.status = status
         self.createdAt = createdAt
         self.startedAt = startedAt
         self.completedAt = completedAt
+        self.failureReasonCode = failureReasonCode
         self.errorMessage = errorMessage
         self.waitReason = waitReason
         self.agentName = agentName
@@ -256,9 +260,18 @@ public enum ReminderProjectionKind: String, Codable, Sendable {
 
 public enum HumanActionKind: String, Codable, Sendable {
     case review
-    case unblock
-    case failure
-    case explicit
+    case actionRequired = "action_required"
+    case failed
+
+    /// Reads v0.2 persisted values without keeping the old user-facing taxonomy alive.
+    public static func fromPersistedValue(_ raw: String?) -> HumanActionKind? {
+        switch raw {
+        case "review": return .review
+        case "action_required", "unblock", "explicit": return .actionRequired
+        case "failed", "failure": return .failed
+        default: return nil
+        }
+    }
 }
 
 public enum ReminderProjectionState: String, Codable, Sendable {
@@ -460,6 +473,7 @@ public struct SyncSummary: Codable, Equatable, Sendable {
     public var continuedRequests: Int = 0
     public var mainCreatedOrUpdated: Int = 0
     public var humanActionsCreatedOrUpdated: Int = 0
+    public var reviewApprovals: Int = 0
     public var resolved: Int = 0
     public var acknowledged: Int = 0
     public var errors: [String] = []

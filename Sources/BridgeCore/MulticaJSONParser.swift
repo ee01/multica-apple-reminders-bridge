@@ -144,8 +144,10 @@ public enum MulticaJSONParser {
         let rawStatus = statusObject.flatMap { string($0, keys: ["name", "slug", "key"]) }
             ?? string(dict, keys: ["status", "state"])
         let errorObject = firstDictionary(in: dict, keys: ["error", "failure"])
-        let errorMessage = errorObject.flatMap { string($0, keys: ["message", "detail", "reason"]) }
-            ?? string(dict, keys: ["error_message", "errorMessage", "failure_reason", "failureReason", "last_error"])
+        let failureReasonCode = string(dict, keys: ["failure_reason", "failureReason", "reason_code", "reasonCode", "error_code", "errorCode"])
+            ?? errorObject.flatMap { string($0, keys: ["code", "reason_code", "reasonCode", "type", "reason"]) }
+        let errorMessage = errorObject.flatMap { string($0, keys: ["message", "detail", "description"]) }
+            ?? string(dict, keys: ["error_message", "errorMessage", "last_error", "lastError"])
         let agentName = nestedActorName(dict["agent"]) ?? string(dict, keys: ["agent_name", "agentName"])
         return RunSnapshot(
             id: id,
@@ -153,6 +155,7 @@ public enum MulticaJSONParser {
             createdAt: date(dict, keys: ["created_at", "createdAt"]),
             startedAt: date(dict, keys: ["started_at", "startedAt"]),
             completedAt: date(dict, keys: ["completed_at", "completedAt", "finished_at", "finishedAt"]),
+            failureReasonCode: failureReasonCode,
             errorMessage: errorMessage,
             waitReason: string(dict, keys: ["wait_reason", "waitReason"]),
             agentName: agentName

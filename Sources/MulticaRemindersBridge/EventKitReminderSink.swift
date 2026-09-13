@@ -32,6 +32,13 @@ final class EventKitReminderSink: ReminderSink {
         return granted
     }
 
+    func ensureLists(_ listNames: Set<String>) async throws {
+        _ = try await ensureAccess()
+        for name in listNames.sorted() where !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            _ = try reminderCalendar(named: name)
+        }
+    }
+
     func upsert(_ item: ReminderItem, existing: ReminderReceipt?) async throws -> ReminderReceipt {
         _ = try await ensureAccess()
         let recovered = try await recoverReminder(receipt: existing, issueKey: item.issueKey, kind: item.kind == .main ? .mainIssue : .humanAction, generation: item.generation)
