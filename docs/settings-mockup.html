@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Multica × Apple Reminders Bridge — Settings Mockup</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f4f5f7;
+    --panel: rgba(255,255,255,.92);
+    --panel2: #fafafa;
+    --text: #15171a;
+    --muted: #6b7280;
+    --line: #e3e5e8;
+    --accent: #2563eb;
+    --accent-soft: #eaf1ff;
+    --ok: #0f8a4b;
+    --warn: #a16207;
+    --danger: #b42318;
+    --shadow: 0 18px 48px rgba(0,0,0,.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121315;
+      --panel: rgba(28,30,33,.96);
+      --panel2: #232529;
+      --text: #f3f4f6;
+      --muted: #a8adb7;
+      --line: #383b40;
+      --accent: #6ea8ff;
+      --accent-soft: #172a49;
+      --ok: #4bd28a;
+      --warn: #f3ba63;
+      --danger: #ff7b72;
+      --shadow: 0 22px 55px rgba(0,0,0,.38);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: radial-gradient(circle at 15% -10%, rgba(37,99,235,.12), transparent 35%), var(--bg);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    color: var(--text);
+  }
+  .shell { width: min(1040px, calc(100vw - 36px)); margin: 34px auto 70px; }
+  .window {
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(18px);
+  }
+  .titlebar {
+    height: 54px; display: flex; align-items: center; gap: 12px;
+    padding: 0 18px; border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--panel) 88%, transparent);
+  }
+  .dots { display: flex; gap: 8px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: #d7d9dd; }
+  .dot:nth-child(1){ background:#ff5f57 } .dot:nth-child(2){ background:#febc2e } .dot:nth-child(3){ background:#28c840 }
+  .title { font-weight: 650; flex:1; text-align:center; margin-right:72px; }
+  .content { padding: 22px; display: grid; gap: 18px; }
+  .intro { display:flex; gap:16px; justify-content:space-between; align-items:flex-start; }
+  .intro h1 { font-size: 22px; margin:0 0 4px; letter-spacing:-.02em; }
+  .intro p { margin:0; color:var(--muted); }
+  .status { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+  .pill { border:1px solid var(--line); border-radius:999px; padding:5px 9px; background:var(--panel2); font-size:12px; white-space:nowrap; }
+  .pill.ok { color:var(--ok); border-color:color-mix(in srgb,var(--ok) 35%, var(--line)); }
+  .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+  .card { border:1px solid var(--line); border-radius:14px; background:var(--panel2); overflow:hidden; }
+  .card.full { grid-column:1/-1; }
+  .card-head { padding:14px 16px 10px; border-bottom:1px solid var(--line); background:color-mix(in srgb,var(--panel) 65%, transparent); }
+  .card-head h2 { margin:0; font-size:15px; }
+  .card-head p { margin:4px 0 0; color:var(--muted); font-size:12px; }
+  .rows { padding: 4px 16px 10px; }
+  .row { min-height:48px; display:grid; grid-template-columns: 190px 1fr auto; gap:12px; align-items:center; border-bottom:1px solid var(--line); }
+  .row:last-child { border-bottom:0; }
+  .label { font-weight:560; }
+  .hint { font-size:12px; color:var(--muted); margin-top:2px; }
+  .field, .select, .button, .seg { min-height:31px; border:1px solid var(--line); border-radius:8px; background:var(--panel); color:var(--text); }
+  .field, .select { padding:6px 9px; }
+  .button { padding:6px 11px; font-weight:560; white-space:nowrap; }
+  .button.primary { background:var(--accent); color:white; border-color:var(--accent); }
+  .button.subtle { background:var(--accent-soft); color:var(--accent); border-color:transparent; }
+  .toggle { width:38px; height:22px; border-radius:999px; background:var(--accent); position:relative; }
+  .toggle:after { content:""; position:absolute; width:18px; height:18px; border-radius:50%; background:white; right:2px; top:2px; box-shadow:0 1px 3px rgba(0,0,0,.25); }
+  .seg { display:inline-flex; padding:2px; gap:2px; }
+  .seg span { padding:5px 9px; border-radius:6px; color:var(--muted); }
+  .seg .active { background:var(--panel2); color:var(--text); box-shadow:0 1px 3px rgba(0,0,0,.10); }
+  .setup { display:grid; grid-template-columns: repeat(4,1fr); gap:10px; }
+  .step { padding:12px; border:1px solid var(--line); border-radius:12px; background:var(--panel2); }
+  .step .n { width:22px; height:22px; border-radius:50%; display:grid; place-items:center; font-size:12px; background:var(--accent-soft); color:var(--accent); margin-bottom:8px; font-weight:700; }
+  .step.done .n { background:color-mix(in srgb,var(--ok) 16%, transparent); color:var(--ok); }
+  .step strong { display:block; font-size:13px; }
+  .step small { color:var(--muted); }
+  .route { display:grid; grid-template-columns:1.1fr 1.2fr 1fr 1fr auto; gap:8px; align-items:center; padding:10px 0; border-bottom:1px solid var(--line); }
+  .route:last-child { border-bottom:0; }
+  .route-head { color:var(--muted); font-size:12px; font-weight:600; }
+  .callout { margin:12px 16px 16px; padding:11px 12px; border-radius:10px; background:var(--accent-soft); color:color-mix(in srgb,var(--text) 85%, var(--accent)); font-size:12px; }
+  .warning { background:color-mix(in srgb,var(--warn) 12%, transparent); color:var(--text); border:1px solid color-mix(in srgb,var(--warn) 28%, transparent); }
+  .req { color:var(--danger); font-size:11px; margin-left:5px; }
+  .footer { display:flex; justify-content:space-between; align-items:center; padding:14px 20px; border-top:1px solid var(--line); background:color-mix(in srgb,var(--panel) 70%, transparent); }
+  .footer-note { color:var(--muted); font-size:12px; }
+  .actions { display:flex; gap:8px; }
+  .legend { margin-top:16px; color:var(--muted); font-size:12px; }
+  @media (max-width: 780px) {
+    .grid { grid-template-columns:1fr; } .card.full{grid-column:auto;} .setup{grid-template-columns:1fr 1fr;}
+    .row{grid-template-columns:1fr; gap:6px; padding:10px 0;} .route{grid-template-columns:1fr 1fr;}
+    .route-head{display:none;} .intro{flex-direction:column;} .status{justify-content:flex-start;}
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="window">
+    <div class="titlebar">
+      <div class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+      <div class="title">Multica Reminders Bridge · Settings</div>
+    </div>
+
+    <div class="content">
+      <div class="intro">
+        <div>
+          <h1>连接 Multica 与 Apple Reminders</h1>
+          <p>Apple Reminder 是任务入口与 Human Action 提醒；Multica 保留 Agent 工作和最终状态。</p>
+        </div>
+        <div class="status">
+          <span class="pill ok">● Multica Connected</span>
+          <span class="pill ok">● Reminders Allowed</span>
+          <span class="pill">Last sync 15:24</span>
+        </div>
+      </div>
+
+      <div class="card full">
+        <div class="card-head"><h2>首次初始化</h2><p>建议将首次使用做成一次性向导；红色“必填”完成后即可开始工作。</p></div>
+        <div style="padding:14px 16px 16px" class="setup">
+          <div class="step done"><div class="n">✓</div><strong>1. 登录 Multica</strong><small>独立 reminders-bridge CLI profile，不启动 daemon。</small></div>
+          <div class="step done"><div class="n">✓</div><strong>2. 选择 Workspace</strong><small>只有一个时可自动选择。</small></div>
+          <div class="step done"><div class="n">✓</div><strong>3. 授权 Reminders</strong><small>EventKit Full Access。</small></div>
+          <div class="step"><div class="n">4</div><strong>4. 准备 Request List</strong><small>自动创建 Agent Requests 与已配置项目 List。</small></div>
+        </div>
+      </div>
+
+      <div class="grid">
+        <section class="card">
+          <div class="card-head"><h2>Multica Cloud</h2><p>Bridge 只读取/写入 Cloud，不启动第二个 daemon。</p></div>
+          <div class="rows">
+            <div class="row"><div><div class="label">CLI</div><div class="hint">自动探测 Homebrew / usr/local</div></div><div class="field">/opt/homebrew/bin/multica</div><button class="button">检测</button></div>
+            <div class="row"><div><div class="label">Profile</div></div><div class="field">reminders-bridge</div><button class="button subtle">重新登录</button></div>
+            <div class="row"><div><div class="label">Workspace <span class="req">必填</span></div></div><div class="select">Personal Workspace ▾</div><span class="pill ok">Connected</span></div>
+            <div class="row"><div><div class="label">App URL</div><div class="hint">用于 Reminder 深链</div></div><div class="field">https://multica.ai</div><span></span></div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>Apple Reminders</h2><p>缺失的通用 List / Project List 建议由 Bridge 自动创建。</p></div>
+          <div class="rows">
+            <div class="row"><div><div class="label">权限 <span class="req">必填</span></div></div><div>Full Access</div><button class="button">检查权限</button></div>
+            <div class="row"><div><div class="label">Generic Request List</div></div><div class="field">Agent Requests</div><button class="button subtle">确保已创建</button></div>
+            <div class="row"><div><div class="label">新 Human Action 通知</div><div class="hint">只给 Review / Action Required / Failed 设置 alarm</div></div><div class="toggle"></div><span></span></div>
+            <div class="row"><div><div class="label">提醒延迟</div></div><div class="select">1 分钟后 ▾</div><span></span></div>
+          </div>
+        </section>
+
+        <section class="card full">
+          <div class="card-head"><h2>Apple → Multica Requests</h2><p>用户在 Agent Requests 或项目 List 创建 Reminder 后，Bridge 创建/继续 Multica Issue。</p></div>
+          <div class="rows">
+            <div class="row"><div><div class="label">启用 Request Dispatch</div></div><div class="toggle"></div><span></span></div>
+            <div class="row"><div><div class="label">默认 Mirror Mode</div></div><div class="seg"><span class="active">Apple origin only</span><span>All active</span><span>Attention only</span></div><span class="pill">推荐</span></div>
+            <div class="row"><div><div class="label">Fallback Project</div><div class="hint">可选；Agent Requests 不一定需要项目</div></div><div class="select">Personal AI ▾</div><span class="pill">可选</span></div>
+            <div class="row"><div><div class="label">Fallback Agent <span class="req">Dispatch 必填</span></div></div><div class="select">Coding Agent · Codex ▾</div><span></span></div>
+          </div>
+        </section>
+
+        <section class="card full">
+          <div class="card-head"><h2>Project Routes</h2><p>常用 Apple List 映射到 Multica Project；Main 与 Review/Action Required/Failed sibling 都留在该项目 List。</p></div>
+          <div class="rows">
+            <div class="route route-head"><span>Apple List</span><span>Multica Project</span><span>Default Agent</span><span>Mirror</span><span></span></div>
+            <div class="route"><div class="field">Agent · Personal AI</div><div class="select">Personal AI ▾</div><div class="select">Coding Agent ▾</div><div class="select">Apple origin only ▾</div><button class="button">…</button></div>
+            <div class="route"><div class="field">Agent · Website</div><div class="select">Website ▾</div><div class="select">Frontend Agent ▾</div><div class="select">Apple origin only ▾</div><button class="button">…</button></div>
+            <div style="padding:10px 0"><button class="button subtle">＋ Add Project Route</button> <button class="button">创建/检查所有 Apple Lists</button></div>
+          </div>
+        </section>
+
+        <section class="card full">
+          <div class="card-head"><h2>Human Action 完成语义</h2><p>这是 Review Reminder 最重要的安全边界。</p></div>
+          <div class="rows">
+            <div class="row"><div><div class="label">Review Reminder 打勾</div></div><div class="select">Approve 并完成 Multica Issue ▾</div><span class="pill ok">默认</span></div>
+            <div class="row"><div><div class="label">Approve Issue</div><div class="hint">Review checkbox 在严格门禁下执行 Multica done；也可配置 acknowledge-only</div></div><div>Multica <b>done</b> → 自动完成 Main + 当前 Human Action</div><span></span></div>
+            <div class="row"><div><div class="label">Action Required / Failed 打勾</div></div><div>只 acknowledge，不自动声称问题已经解决</div><span></span></div>
+          </div>
+          <div class="callout warning"><b>只有 Review checkbox 具有 approval 语义。</b> Bridge 仅在 Issue 仍为 <code>in_review</code>、当前 generation 且无 active Run 时执行 <code>done</code>。Action Required / Failed 始终只是 acknowledge。</div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>同步与恢复</h2></div>
+          <div class="rows">
+            <div class="row"><div class="label">Poll interval</div><div class="select">3 分钟 ▾</div><span></span></div>
+            <div class="row"><div class="label">Blocked grace</div><div class="select">10 分钟 ▾</div><span></span></div>
+            <div class="row"><div class="label">Failed reminders</div><div class="toggle"></div><span></span></div>
+            <div class="row"><div class="label">Run at Login</div><div class="toggle"></div><span></span></div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>诊断</h2></div>
+          <div class="rows">
+            <div class="row"><div class="label">Multica Cloud</div><div style="color:var(--ok)">Connected · workspace Personal</div><button class="button">Test</button></div>
+            <div class="row"><div class="label">Apple EventKit</div><div style="color:var(--ok)">Allowed · 3 Lists ready</div><button class="button">Test Reminder</button></div>
+            <div class="row"><div class="label">Last sync</div><div>15:24 · 0 errors</div><button class="button">Sync Now</button></div>
+          </div>
+        </section>
+      </div>
+
+      <div class="legend">此页面是纯静态 UI mockup：字段基于当前 v0.3.0 SettingsView 与已实现行为，包括首次自动创建 List、三类 Human Action 与 Review approval 配置。</div>
+    </div>
+
+    <div class="footer">
+      <div class="footer-note">Main Reminder 不自动设 alarm；Human Action sibling 才打扰你。</div>
+      <div class="actions"><button class="button">Cancel</button><button class="button primary">Save & Sync</button></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

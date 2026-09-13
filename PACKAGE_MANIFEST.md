@@ -1,6 +1,6 @@
 # Package Manifest
 
-完整源码包包含可运行 v0.2 源码、测试、文档以及完整 `.git/` 历史；不是预编译签名发行版。
+完整源码包包含可运行 v0.3 源码、测试、文档以及完整 `.git/` 历史；不是预编译签名发行版。
 
 ## Runtime
 
@@ -32,6 +32,8 @@
 - `docs/PLAN.md`
 - `docs/APPLE_TO_MULTICA_DISPATCH.md`
 - `docs/ATTENTION_POLICY.md`
+- `docs/HUMAN_ACTION_V0.3_PLAN.md`
+- `docs/settings-mockup.html`
 - `docs/INSTALLATION.md`
 - `docs/TESTING.md`
 - `docs/VERIFICATION.md`

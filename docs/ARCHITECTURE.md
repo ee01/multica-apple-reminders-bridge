@@ -66,7 +66,7 @@ Apple authoritative only for：
 - 用户是否完成/删除某个 Apple projection；
 - 用户创建的新 Agent Request 内容。
 
-Apple checkbox 不直接 mutate Multica lifecycle。
+Apple checkbox 通常不直接 mutate Multica lifecycle；唯一显式例外是当前 Review sibling：严格门禁通过时，完成即 approve 并将 Issue 设为 done。
 
 ## 4. Request scanner
 

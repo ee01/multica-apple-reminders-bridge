@@ -1,6 +1,6 @@
 # Apple Reminders → Multica Dispatch & Projection Design
 
-> v0.2 implemented design
+> v0.3 implemented design (v0.2 dispatch model + v0.3 Human Action semantics)
 > 默认：`apple_origin_only`
 
 ## 1. 核心决策：Main + Human Action sibling
@@ -86,7 +86,7 @@ Bridge 检测到 Issue URL 后：
 
 ```text
 in_review -> Review: <title>
-blocked   -> Unblock: <title>
+blocked   -> Action Required: <title>
 failed    -> Check failed Agent task: <title>
 ```
 
@@ -185,7 +185,7 @@ resolve all active Human Actions
 
 ## 10. Artifact Review
 
-v0.2 不把 PDF/PPT/大 Markdown 复制到 Reminders。
+v0.3 仍不把 PDF/PPT/大 Markdown 复制到 Reminders。
 
 Human Action Notes 只放 compact summary，URL 始终优先指向 durable Multica Issue。完整 artifact/transcript/review 在 Multica 中完成。
 

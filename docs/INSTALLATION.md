@@ -69,9 +69,10 @@ Mirror: apple_origin_only
 ### Reminders
 
 1. Grant / Check Reminders Permission；
-2. Create Test Reminder；
-3. 在 Mac 与 iPhone 确认 iCloud 同步；
-4. 保留 Human Action alarm 开启（默认 60 秒）。
+2. 首次 sync 会自动确保 `Agent Requests` 与所有 configured Project Route Lists 存在，无需手工创建；
+3. Create Test Reminder；
+4. 在 Mac 与 iPhone 确认 iCloud 同步；
+5. 保留 Human Action alarm 开启（默认 60 秒）。
 
 ### Background
 
@@ -85,13 +86,18 @@ Mirror: apple_origin_only
 
 ### Review
 
-Agent 交付后，同 Project List 出现：
+Agent 最终交付后，同 Project List 出现：
 
 ```text
 Review: <task> 🔔
 ```
 
-点 URL 打开 Multica 深度 Review。
+两种处理方式：
+
+- 在 Multica 深度 Review；Request Changes 会产生新的 Run，Bridge 自动收尾当前 Review sibling；
+- 如果结果可接受且本次 Review 就是任务最终验收，直接在 Apple Reminders 勾选该 Review。默认配置下 Bridge 会在严格门禁通过后执行 Multica `done`，再反向完成 Main。
+
+`Action Required` / `Failed` 的 checkbox 不具备上述 approval 语义。
 
 ### 继续已有 Issue
 

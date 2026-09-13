@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0 - 2026-09-13
+
+- Collapse user-facing Human Action taxonomy to **Review / Action Required / Failed**.
+- Map `blocked` to Action Required without Agent prompt or Skill injection.
+- Parse Multica Run failure reason codes and create Failed siblings for terminal failed runs with no newer active retry.
+- Refresh stale failed/in_review snapshots from `issue runs` before alerting, preventing false Failed/Review reminders during automatic retry/rework.
+- Completing the current Review sibling now defaults to explicit approval: guarded `multica issue status <issue> done`, followed by Main reconciliation.
+- Re-open Review Reminder when the Multica status write fails, so approval intent is not silently lost.
+- Action Required / Failed completion remains acknowledge-only; never auto-unblocks or retries.
+- Add configurable `reviewCompletionBehavior` (`close_issue` default, `acknowledge_only` optional).
+- Automatically ensure `Agent Requests` and configured Project Route Reminder Lists on first sync.
+- Migrate persisted v0.2 `unblock/failure/explicit` action kinds to `action_required/failed`.
+
+
 ## 0.2.0 - 2026-09-12
 
 Implemented bidirectional Apple Reminders <-> Multica Cloud workflow:

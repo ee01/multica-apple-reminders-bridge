@@ -1,6 +1,6 @@
-# Multica Cloud × Apple Reminders Bridge — v0.2 Implementation Plan & Status
+# Multica Cloud × Apple Reminders Bridge — v0.3 Implementation Plan & Status
 
-> 日期：2026-09-12
+> 日期：2026-09-13
 > 部署：Multica Cloud + Web/Desktop；不 self-host
 > 默认 Mirror Mode：`apple_origin_only`
 > 状态：**Phase A–F implemented；真实 macOS/iCloud/Cloud interactive acceptance pending**
@@ -11,7 +11,7 @@
 Apple Reminders                     Multica Cloud
 ────────────────────────────────────────────────────────
 Project Request/Main   <--------->  Issue
-Human Action sibling  <-----------  Review / Block / Failure
+Human Action sibling  <-----------  Review / Action Required / Failed
                                       |
                                       v
                                 Desktop daemon
@@ -21,10 +21,12 @@ Human Action sibling  <-----------  Review / Block / Failure
 设计原则：
 
 1. Main Reminder 始终留在原 Project List；不用 List 移动表达 ownership。
-2. Review/Unblock/Failure 是独立 sibling Reminder，可单独完成。
+2. Human Action 只有三种简单类型：Review / Action Required / Failed；都与 Main 同 List。
 3. Human Action sibling 才设置近期 alarm；Main 不由 Bridge 设置提醒时间。
+   - `Review` 只表示最终交付验收；默认勾选可关闭整个 Issue。
+   - 仍需用户输入、修复、授权或恢复后继续执行的场景使用 `Action Required` / `Failed`，其 checkbox 只 acknowledgement。
 4. 默认 `apple_origin_only`。
-5. Multica 是 Issue/Run 权威；Apple checkbox 不直接 mutate Multica。
+5. Multica 是 Issue/Run 权威；Review checkbox 在严格门禁下可作为显式 approval，其余 checkbox 不直接 mutate Multica。
 6. 用户可完全绕过 Apple、直接在 Multica Review；Bridge 必须自动 reconciliation。
 
 ---
@@ -37,7 +39,7 @@ Human Action sibling  <-----------  Review / Block / Failure
 - `IssueOrigin`: `apple | multica`；
 - `IssueBinding`：Issue ↔ route/project/list；
 - `ReminderProjectionKind`: `main_issue | human_action`；
-- `HumanActionKind`: review/unblock/failure/explicit；
+- `HumanActionKind`: `review | action_required | failed`；v0.2 `unblock/failure/explicit` 自动迁移；
 - `AgentRequestRecord`；
 - `ProjectRoute`；
 - SQLite v2 tables：binding / request / observation / projection；
@@ -108,8 +110,9 @@ Agent · Personal AI
 已实现：
 
 - Review sibling；
-- blocked grace 后 Unblock sibling；
-- unrecovered failure sibling；
+- blocked grace 后 Action Required sibling；
+- 最终失败且没有更新 active retry 时 Failed sibling；
+- Run failure reason code 写入 Failed Notes；
 - 与 Main 使用同一 `appleListName`；
 - Human Action 默认 absolute alarm；
 - Main 无 Bridge-managed alarm；
@@ -159,13 +162,21 @@ Bridge 不再重建该 Main，但**不会写 Multica Issue done/cancelled**。
 
 ### Human Action
 
-用户完成或删除 Review/Unblock/Failure sibling：
+Human Action completion semantics：
 
 ```text
-acknowledge this human-action cycle only
+Review complete
+→ 默认 approve current delivery
+→ strict guards
+→ multica issue status <issue> done
+→ Main + Review resolve
+
+Action Required / Failed complete
+→ acknowledge only
+→ no status mutation / no retry
 ```
 
-不修改 Multica Issue。
+删除 Review 仍只表示 dismiss，不是 approve。若 `reviewCompletionBehavior=acknowledge_only`，Review 也回到旧的 acknowledge-only 语义。
 
 同一 cycle 不重建；发生真实 rework + 新 delivery 后创建下一 generation。
 
@@ -183,6 +194,23 @@ acknowledge this human-action cycle only
 - Human Action alarm；
 - poll/grace/failure；
 - Run at Login。
+
+---
+
+## v0.3 Human Action refinement ✅
+
+本轮从 v0.2 继续完成：
+
+1. 不注入 Agent System Prompt / Skill；Bridge 只消费 Issue + Run 结构化状态。
+2. `blocked` 统一投影为 **Action Required**。
+3. 最终 failed Run 且没有更新 active retry 时投影为 **Failed**；覆盖 runtime offline retry exhausted、queued_expired、auth/quota/config/environment 等失败。
+4. stale failed snapshot 会先 `issue runs` 校准，避免已有 queued/running retry 时误报 Failed。
+5. stale `in_review` 也会用 Runs 校准，active rework 优先。
+6. Review checkbox 默认成为显式 approval：严格门禁后执行 `multica issue status <issue> done`；Cloud status write 失败会重新打开 Review Reminder。
+7. Action Required / Failed checkbox 只 acknowledgement，不自动重跑或解除 blocked。
+8. 首次同步自动 `ensureLists()`：创建 `Agent Requests` 和所有配置的 Project Route Lists。
+
+详细决策见 [HUMAN_ACTION_V0.3_PLAN.md](HUMAN_ACTION_V0.3_PLAN.md)。
 
 ---
 
@@ -206,7 +234,8 @@ acknowledge this human-action cycle only
 - second review generation；
 - Multica done；
 - Main Apple completion/delete semantics；
-- Human Action acknowledgement semantics；
+- Review approval-to-done 严格门禁与失败回滚；
+- Action Required / Failed acknowledgement-only semantics；
 - SQLite restart；
 - closed-list recovery；
 - CLI login never starts daemon；
@@ -235,7 +264,7 @@ acknowledge this human-action cycle only
 
 ---
 
-## 不在 v0.2 的范围
+## 不在 v0.3 的范围
 
 - Apple Reminders assignee / Assigned to Me（EventKit 无稳定写接口）；
 - Reminders subtask（EventKit 无公开 parent/subtask API）；

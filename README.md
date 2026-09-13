@@ -4,11 +4,11 @@
 
 - 在 Apple Reminders 创建 Agent Request，Bridge 将它派发到 Multica；
 - 一个 Apple-origin Multica Issue 保留一个 **Main Reminder**，用于项目视图；
-- 当 Agent 真正需要人 Review / 解阻 / 处理失败时，Bridge 在**同一个项目 List**创建独立 **Human Action sibling Reminder**，并设置近期 alarm；
+- 当 Agent 真正需要人处理时，Bridge 在**同一个项目 List**创建三类简单 Human Action sibling：**Review / Action Required / Failed**，并设置近期 alarm；
 - 用户也可以直接在 Multica Review/返工/Done，Bridge 会自动回收 Apple 侧 sibling；
-- Apple checkbox 不会直接修改 Multica Issue 状态。
+- Apple checkbox 默认不承担泛化控制语义；唯一例外是当前 Review sibling：严格门禁通过后，勾选即表示审核通过并把 Multica Issue 设为 `done`。
 
-当前版本：`0.2.0`。
+当前版本：`0.3.0`。
 
 ## 核心模型
 
@@ -38,7 +38,7 @@ Multica done:
 ✓ Review: ...
 ```
 
-**Main 与 Human Action 是不同 Reminder。**因此用户在手机通知上把 `Review: ...` 标记完成，只处理这一轮人的行动，不会误把整个 Agent Task 完成。
+**Main 与 Human Action 是不同 Reminder。**因此 Action Required / Failed 可以独立 acknowledgement，不会误把整个 Agent Task 完成。Review 是唯一的高责任例外：它只用于“最终交付等待验收”，默认勾选即表示 approve；Bridge 通过严格门禁后把 Multica Issue 设为 `done`，随后反向完成 Main。若某个“审核”通过后 Agent 还应继续下一阶段，它必须建模为 Action Required / 后续 Run，而不是 Review。
 
 ## 默认 Mirror Mode
 
@@ -102,8 +102,8 @@ Bridge 会：
 ```text
 active Run                       -> Agent owns turn, no Human Action
 in_review + no active Run        -> Review sibling + alarm
-blocked + grace expired          -> Unblock sibling + alarm
-failed + no visible recovery     -> Failure sibling + alarm
+blocked + grace expired          -> Action Required sibling + alarm
+failed + no newer active retry   -> Failed sibling + alarm
 done / cancelled                 -> resolve Main + Human Actions
 ```
 
@@ -132,10 +132,12 @@ Bridge **从不执行** `multica setup` 或 `multica daemon`。Desktop 继续管
 ## Apple checkbox 语义
 
 - 完成/删除 **Main Reminder**：仅表示“不要继续在 Apple 里维持这个 Main 投影”；不会关闭 Multica Issue。以后如果该 Issue 新出现 Human Action，Bridge 仍可创建 sibling。
-- 完成/删除 **Human Action sibling**：仅 acknowledgement；不会把 Multica Issue 标记 `done`。
+- 完成当前 **Review sibling**：默认等价于“审核通过”。Bridge 只有在 Issue 仍为 `in_review`、没有 active Run、且是当前 review generation 时才执行 `multica issue status <issue> done`，随后反向完成 Main。状态写失败时会重新打开 Review Reminder。
+- 删除 Review sibling：只 dismiss，不是 approve。
+- 完成/删除 **Action Required / Failed sibling**：仅 acknowledgement/dismissal，不改变 Multica status，也不会自动 retry。
 - 在 Multica `done/cancelled`：Bridge 自动完成对应 Main 与未完成 Human Action。
 
-这是刻意的 authority boundary：Multica 是 Agent work 的 Source of Truth，Apple Reminders 是项目投影 + 人类行动入口。
+这是刻意的 authority boundary：Review checkbox 有明确的 approval 语义；blocked/failure 的解决方式不确定，因此不能从一个 checkbox 猜测已恢复。
 
 ## 安装
 
@@ -158,8 +160,9 @@ make install
 4. Refresh Projects / Agents；
 5. 配置 fallback Agent，以及需要的 Project Routes；
 6. Grant Reminders Permission；
-7. Create Test Reminder；
-8. 可开启 Run at Login。
+7. Bridge 首次同步会自动确保 `Agent Requests` 与已配置的 Project Route Lists 存在；
+8. Create Test Reminder；
+9. 可开启 Run at Login。
 
 详见 [docs/INSTALLATION.md](docs/INSTALLATION.md)。
 
@@ -183,6 +186,8 @@ make verify
 - [Phase A–F Implementation Plan](docs/PLAN.md)
 - [Apple → Multica Dispatch](docs/APPLE_TO_MULTICA_DISPATCH.md)
 - [Attention Policy](docs/ATTENTION_POLICY.md)
+- [v0.3 Human Action Decision](docs/HUMAN_ACTION_V0.3_PLAN.md)
+- [Static Settings Mockup](docs/settings-mockup.html)
 - [Installation](docs/INSTALLATION.md)
 - [Testing](docs/TESTING.md)
 - [Verification Receipt](docs/VERIFICATION.md)
@@ -191,7 +196,7 @@ make verify
 
 ## Source adapters
 
-`MulticaCliSource` 是 v0.2 默认：官方 CLI 管理登录/token，Bridge 不读取 Desktop 私有 token，也不直接持有 PAT。
+`MulticaCliSource` 是 v0.3 默认：官方 CLI 管理登录/token，Bridge 不读取 Desktop 私有 token，也不直接持有 PAT。
 
 未来仍可实现 `MulticaApiSource` 来减少 subprocess、精细控制 HTTP/retry/event，但它不是当前功能完整性的前置条件。
 
