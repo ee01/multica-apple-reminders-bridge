@@ -86,7 +86,7 @@ final class EventKitReminderSink: ReminderSink {
                 let calendarID = reminder.calendarItemIdentifier
                 let externalID = reminder.calendarItemExternalIdentifier
                 let stableID = externalID ?? calendarID
-                guard let stableID, !stableID.isEmpty else { continue }
+                guard !stableID.isEmpty else { continue }
                 output.append(AgentRequestSnapshot(
                     id: stableID,
                     receipt: ReminderReceipt(calendarItemIdentifier: calendarID, externalIdentifier: externalID),
