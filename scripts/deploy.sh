@@ -28,7 +28,13 @@ ZIP_PATH="$ROOT/dist/${ZIP_NAME}"
 PLIST="$ROOT/resources/Info.plist"
 
 sync_version() {
-  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION}" "$PLIST"
+  local current
+  current="$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$PLIST")"
+  if [[ "$current" != "$VERSION" ]]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION}" "$PLIST"
+    echo "Updated Info.plist version from ${current} to ${VERSION}. Commit the change before publishing." >&2
+    exit 1
+  fi
 }
 
 extract_release_notes() {
@@ -39,7 +45,19 @@ extract_release_notes() {
   ' "$ROOT/CHANGELOG.md" | sed '/./,$!d'
 }
 
-echo "==> Syncing app version to ${VERSION}"
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "Working tree has uncommitted changes. Commit before publishing ${TAG}." >&2
+  git status --short
+  exit 1
+fi
+
+CURRENT_BRANCH="$(git branch --show-current)"
+if [[ "$CURRENT_BRANCH" != "main" ]]; then
+  echo "Expected branch 'main', got '${CURRENT_BRANCH}'." >&2
+  exit 1
+fi
+
+echo "==> Verifying app version ${VERSION}"
 sync_version
 
 can_run_tests() {
@@ -68,18 +86,6 @@ echo "Created ${ZIP_PATH}"
 NOTES="$(extract_release_notes)"
 if [[ -z "$NOTES" ]]; then
   echo "No CHANGELOG section found for ${VERSION}. Add an entry under '## ${VERSION} - ...'." >&2
-  exit 1
-fi
-
-if [[ -n "$(git status --porcelain)" ]]; then
-  echo "Working tree has uncommitted changes. Commit before publishing ${TAG}." >&2
-  git status --short
-  exit 1
-fi
-
-CURRENT_BRANCH="$(git branch --show-current)"
-if [[ "$CURRENT_BRANCH" != "main" ]]; then
-  echo "Expected branch 'main', got '${CURRENT_BRANCH}'." >&2
   exit 1
 fi
 
