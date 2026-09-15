@@ -12,6 +12,7 @@ public protocol MulticaSource {
     func fetchIssues() async throws -> [IssueSnapshot]
     func fetchIssue(idOrKey: String) async throws -> IssueSnapshot
     func fetchRuns(issueIDOrKey: String) async throws -> [RunSnapshot]
+    func fetchRecentMemberComments(issueIDOrKey: String, limit: Int) async throws -> [String]
     func authStatus() async throws -> String
     func version() async throws -> String
 
@@ -23,6 +24,7 @@ public protocol MulticaSource {
     func setIssueStatus(issueIDOrKey: String, statusKey: String) async throws
     func listProjects() async throws -> [MulticaProject]
     func listAgents() async throws -> [MulticaAgent]
+    func listSquads() async throws -> [MulticaAgent]
 }
 
 public extension MulticaSource {
@@ -34,6 +36,8 @@ public extension MulticaSource {
     func setIssueStatus(issueIDOrKey: String, statusKey: String) async throws { throw BridgeCapabilityError.unsupported("setIssueStatus") }
     func listProjects() async throws -> [MulticaProject] { [] }
     func listAgents() async throws -> [MulticaAgent] { [] }
+    func listSquads() async throws -> [MulticaAgent] { [] }
+    func fetchRecentMemberComments(issueIDOrKey: String, limit: Int) async throws -> [String] { [] }
 }
 
 @MainActor
@@ -44,6 +48,7 @@ public protocol ReminderSink: AnyObject {
     func resolve(_ receipt: ReminderReceipt, issueKey: String, kind: ReminderProjectionKind, generation: Int) async throws
     func state(of receipt: ReminderReceipt, issueKey: String, kind: ReminderProjectionKind, generation: Int) async throws -> ReminderRemoteState
     func scanRequests(in listNames: Set<String>) async throws -> [AgentRequestSnapshot]
+    func unavailableLists(in listNames: Set<String>) async -> [String]
     func createTestReminder(title: String, notes: String) async throws -> ReminderReceipt
 }
 
@@ -59,6 +64,7 @@ public extension ReminderSink {
     }
 
     func scanRequests(in listNames: Set<String>) async throws -> [AgentRequestSnapshot] { [] }
+    func unavailableLists(in listNames: Set<String>) async -> [String] { [] }
 }
 
 public protocol BridgePersistence: AnyObject {

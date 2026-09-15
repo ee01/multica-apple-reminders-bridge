@@ -51,6 +51,29 @@ public enum MulticaJSONParser {
         }
     }
 
+    public static func parseComments(_ data: Data) throws -> [IssueComment] {
+        let root = try json(data)
+        return try extractArray(root, preferredKeys: ["comments", "items", "data", "results", "threads"]).compactMap { raw in
+            guard let dict = raw as? [String: Any] else { return nil }
+            return parseComment(dict)
+        }
+    }
+
+    private static func parseComment(_ dict: [String: Any]) -> IssueComment? {
+        guard let id = string(dict, keys: ["id", "comment_id", "commentId", "uuid"]) else { return nil }
+        let content = string(dict, keys: ["content", "body", "text", "preview"]) ?? ""
+        let authorType = string(dict, keys: ["author_type", "authorType", "type"])
+            ?? nestedString(dict["author"], keys: ["type", "kind", "role"])
+            ?? "unknown"
+        return IssueComment(
+            id: id,
+            authorType: authorType,
+            content: content,
+            createdAt: date(dict, keys: ["created_at", "createdAt"]),
+            parentID: string(dict, keys: ["parent_id", "parentId"])
+        )
+    }
+
     public static func parseWorkspaceList(_ data: Data) throws -> [(id: String, name: String, slug: String?)] {
         let root = try json(data)
         return try extractArray(root, preferredKeys: ["workspaces", "items", "data", "results"]).compactMap { raw in
@@ -72,11 +95,23 @@ public enum MulticaJSONParser {
     }
 
     public static func parseAgents(_ data: Data) throws -> [MulticaAgent] {
+        try parseAssignees(data, preferredKeys: ["agents", "items", "data", "results"], kind: .agent)
+    }
+
+    public static func parseSquads(_ data: Data) throws -> [MulticaAgent] {
+        try parseAssignees(data, preferredKeys: ["squads", "items", "data", "results"], kind: .squad)
+    }
+
+    private static func parseAssignees(_ data: Data, preferredKeys: [String], kind: MulticaAssigneeKind) throws -> [MulticaAgent] {
         let root = try json(data)
-        return try extractArray(root, preferredKeys: ["agents", "items", "data", "results"]).compactMap { raw in
+        return try extractArray(root, preferredKeys: preferredKeys).compactMap { raw in
             guard let dict = raw as? [String: Any],
-                  let id = string(dict, keys: ["id", "agent_id", "agentId", "uuid"]) else { return nil }
-            return MulticaAgent(id: id, name: string(dict, keys: ["name", "display_name", "displayName", "title"]) ?? id)
+                  let id = string(dict, keys: ["id", "agent_id", "agentId", "squad_id", "squadId", "uuid"]) else { return nil }
+            return MulticaAgent(
+                id: id,
+                name: string(dict, keys: ["name", "display_name", "displayName", "title"]) ?? id,
+                kind: kind
+            )
         }
     }
 
@@ -112,7 +147,8 @@ public enum MulticaJSONParser {
 
         let updatedAt = date(dict, keys: ["updated_at", "updatedAt", "modified_at", "modifiedAt"])
         let dueDate = date(dict, keys: ["due_date", "dueDate"])
-        let summary = string(dict, keys: ["result_summary", "resultSummary", "summary", "latest_summary", "latestSummary", "description_preview"])
+        let summary = string(dict, keys: ["result_summary", "resultSummary", "latest_summary", "latestSummary", "description_preview"])
+        let issueDescription = string(dict, keys: ["description"])
 
         var latestRun: RunSnapshot?
         if let runDict = firstDictionary(in: dict, keys: ["latest_run", "latestRun", "run"]) {
@@ -134,6 +170,7 @@ public enum MulticaJSONParser {
             updatedAt: updatedAt,
             dueDate: dueDate,
             summary: summary,
+            issueDescription: issueDescription,
             latestRun: latestRun
         )
     }

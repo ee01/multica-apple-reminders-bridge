@@ -4,6 +4,7 @@ import BridgeCore
 import Foundation
 import Network
 import ServiceManagement
+import SwiftUI
 
 struct WorkspaceOption: Identifiable, Hashable {
     let id: String
@@ -20,13 +21,33 @@ final class BridgeAppModel: ObservableObject {
     @Published var lastSyncSummary: SyncSummary?
     @Published var lastError: String?
     @Published var isSyncing = false
+    @Published var isConnecting = false
+    @Published var isAuthenticated = false
     @Published var workspaces: [WorkspaceOption] = []
     @Published var projects: [MulticaProject] = []
     @Published var agents: [MulticaAgent] = []
+    @Published var appleReminderLists: [String] = []
     @Published var runAtLogin = false
+    @Published var isLoadingCatalog = false
+    @Published var catalogError: String?
+
+    var checklist: SetupChecklist {
+        SetupChecklist(
+            isAuthenticated: isAuthenticated,
+            hasWorkspace: configuration.workspaceID?.isEmpty == false,
+            hasRemindersAccess: reminderPermissionStatus == "Allowed"
+        )
+    }
+
+    var menuBarSymbol: String {
+        checklist.isReadyToSync ? "checklist.checked" : "exclamationmark.circle"
+    }
 
     private var pollTask: Task<Void, Never>?
     private var wakeObserver: NSObjectProtocol?
+    private var activateObserver: NSObjectProtocol?
+    private var didOfferOnboarding = false
+    private var onboardingWindow: NSWindow?
     private let networkMonitor = NWPathMonitor()
     private let networkQueue = DispatchQueue(label: "ai.personal.multica-reminders-bridge.network")
     private var networkMonitorStarted = false
@@ -41,6 +62,9 @@ final class BridgeAppModel: ObservableObject {
             try? configuration.save(to: BridgePaths.configurationURL)
         }
         runAtLogin = SMAppService.mainApp.status == .enabled
+        applyRunAtLoginPreference()
+        reminderPermissionStatus = EventKitReminderSink.authorizationLabel
+        appleReminderLists = EventKitReminderSink.writableListNames()
 
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification,
@@ -49,12 +73,23 @@ final class BridgeAppModel: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor in await self?.syncNow() }
         }
+        activateObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in await self?.handleAppBecameActive() }
+        }
+        Task { @MainActor [weak self] in
+            self?.start()
+        }
     }
 
     deinit {
         pollTask?.cancel()
         networkMonitor.cancel()
         if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
+        if let activateObserver { NotificationCenter.default.removeObserver(activateObserver) }
     }
 
     func start() {
@@ -78,9 +113,16 @@ final class BridgeAppModel: ObservableObject {
     }
 
     func bootstrap() async {
+        reminderPermissionStatus = EventKitReminderSink.authorizationLabel
+        loadAppleReminderLists()
         await testConnection(loadWorkspaceList: true)
-        await refreshReminderPermission()
-        await syncNow()
+        if !checklist.isReadyToSync, !didOfferOnboarding {
+            didOfferOnboarding = true
+            openOnboardingWindow()
+        }
+        if checklist.isReadyToSync {
+            await syncNow()
+        }
     }
 
     func saveConfiguration() {
@@ -95,14 +137,26 @@ final class BridgeAppModel: ObservableObject {
 
     func connectMultica() async {
         lastError = nil
-        connectionStatus = "Opening browser sign-in…"
+        isConnecting = true
+        connectionStatus = "Waiting for browser sign-in…"
+        defer { isConnecting = false }
+
+        let loginTask = Task { try await makeCliSource().login() }
+        let pollTask = Task { await self.pollForAuthentication() }
         do {
-            let source = makeCliSource()
-            try await source.login()
-            connectionStatus = try await source.authStatus()
-            await loadWorkspaces()
-            saveConfiguration()
+            _ = try await loginTask.value
+            pollTask.cancel()
+            _ = await refreshAuthentication(loadCatalogIfPossible: true)
         } catch {
+            pollTask.cancel()
+            if isAuthenticated {
+                lastError = nil
+                return
+            }
+            if await refreshAuthentication(loadCatalogIfPossible: true) {
+                lastError = nil
+                return
+            }
             connectionStatus = "Disconnected"
             lastError = String(describing: error)
             await BridgeLogger.shared.write("Multica login failed: \(error)")
@@ -111,19 +165,10 @@ final class BridgeAppModel: ObservableObject {
 
     func testConnection(loadWorkspaceList: Bool = false) async {
         lastError = nil
-        do {
-            let source = makeCliSource()
-            let version = try await source.version()
-            let auth = try await source.authStatus()
-            connectionStatus = "Connected · \(version.split(separator: "\n").first.map(String.init) ?? "Multica")\n\(auth)"
-            if loadWorkspaceList {
-                await loadWorkspaces()
-                await loadCatalog()
-            }
-        } catch {
-            connectionStatus = "Disconnected"
-            lastError = String(describing: error)
-        }
+        if await refreshAuthentication(loadCatalogIfPossible: loadWorkspaceList) { return }
+        connectionStatus = "Disconnected"
+        if !checklist.isReadyToSync { return }
+        lastError = "Multica is not signed in. Use Connect Multica, then return here — Bridge will pick up the session automatically."
     }
 
     func loadWorkspaces() async {
@@ -158,17 +203,47 @@ final class BridgeAppModel: ObservableObject {
         guard configuration.workspaceID != nil else {
             projects = []
             agents = []
+            catalogError = nil
             return
         }
+        isLoadingCatalog = true
+        defer { isLoadingCatalog = false }
+        let source = makeCliSource()
+        var loadedProjects: [MulticaProject] = []
+        var loadedAssignees: [MulticaAgent] = []
+        var errors: [String] = []
+
         do {
-            async let loadedProjects = makeCliSource().listProjects()
-            async let loadedAgents = makeCliSource().listAgents()
-            projects = try await loadedProjects.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-            agents = try await loadedAgents.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-            lastError = nil
+            loadedProjects = try await source.listProjects()
         } catch {
-            lastError = "Load Multica project/agent catalog: \(error)"
+            errors.append("projects: \(error)")
         }
+        do {
+            loadedAssignees.append(contentsOf: try await source.listAgents())
+        } catch {
+            errors.append("agents: \(error)")
+        }
+        do {
+            loadedAssignees.append(contentsOf: try await source.listSquads())
+        } catch {
+            // Squads are optional. Older CLIs or empty workspaces should not block agent pickers.
+        }
+
+        projects = loadedProjects.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        agents = loadedAssignees.sorted { lhs, rhs in
+            if lhs.kind != rhs.kind { return lhs.kind == .agent }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+        catalogError = errors.isEmpty ? nil : errors.joined(separator: "\n")
+        applyDefaultAssigneeIfNeeded()
+    }
+
+    /// New users should not have to open Settings to pick an assignee.
+    private func applyDefaultAssigneeIfNeeded() {
+        guard configuration.defaultAgentID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false else { return }
+        guard let preferred = agents.preferredDefaultAssignee() else { return }
+        setDefaultAgent(preferred.id)
+        saveConfiguration()
     }
 
     func setDefaultProject(_ id: String) {
@@ -182,20 +257,36 @@ final class BridgeAppModel: ObservableObject {
     }
 
     func addProjectRoute() {
-        configuration.projectRoutes.append(ProjectRoute(appleListName: "Agent · Project", mirrorMode: configuration.defaultMirrorMode))
+        configuration.projectRoutes.append(ProjectRoute(appleListName: "", mirrorMode: configuration.defaultMirrorMode))
+    }
+
+    func loadAppleReminderLists() {
+        appleReminderLists = EventKitReminderSink.writableListNames()
+    }
+
+    func refreshAppleReminderLists() async {
+        do {
+            let sink = EventKitReminderSink(configuration: configuration)
+            _ = try await sink.requestAccess()
+        } catch {}
+        loadAppleReminderLists()
     }
 
     func removeProjectRoute(id: String) {
         configuration.projectRoutes.removeAll { $0.id == id }
     }
 
-    func refreshReminderPermission() async {
+    func refreshReminderPermission(prompt: Bool = true) async {
+        reminderPermissionStatus = EventKitReminderSink.authorizationLabel
+        guard prompt || EventKitReminderSink.hasFullAccess else { return }
         do {
             let sink = EventKitReminderSink(configuration: configuration)
             let granted = try await sink.requestAccess()
             reminderPermissionStatus = granted ? "Allowed" : "Denied"
+            lastError = nil
+            await refreshAppleReminderLists()
         } catch {
-            reminderPermissionStatus = "Denied"
+            reminderPermissionStatus = EventKitReminderSink.authorizationLabel
             lastError = String(describing: error)
         }
     }
@@ -215,11 +306,13 @@ final class BridgeAppModel: ObservableObject {
     }
 
     func syncNow() async {
+        guard checklist.isReadyToSync else { return }
         guard !isSyncing else { return }
         isSyncing = true
         defer { isSyncing = false }
         do {
             saveConfiguration()
+            await BridgeLogger.shared.write("Sync starting")
             let db = try BridgeDatabase(path: BridgePaths.databaseURL.path)
             try db.migrate()
             let sink = EventKitReminderSink(configuration: configuration)
@@ -228,7 +321,11 @@ final class BridgeAppModel: ObservableObject {
             let summary = try await engine.sync()
             lastSyncSummary = summary
             lastError = summary.errors.isEmpty ? nil : summary.errors.joined(separator: "\n")
-            await BridgeLogger.shared.write("Sync fetched=\(summary.fetchedIssues) dispatched=\(summary.dispatchedRequests) main=\(summary.mainCreatedOrUpdated) human=\(summary.humanActionsCreatedOrUpdated) resolved=\(summary.resolved) errors=\(summary.errors.count)")
+            loadAppleReminderLists()
+            await BridgeLogger.shared.write("Sync fetched=\(summary.fetchedIssues) scanned=\(summary.scannedRequests) dispatched=\(summary.dispatchedRequests) main=\(summary.mainCreatedOrUpdated) human=\(summary.humanActionsCreatedOrUpdated) resolved=\(summary.resolved) errors=\(summary.errors.count)")
+            for error in summary.errors {
+                await BridgeLogger.shared.write("Sync error: \(error)")
+            }
         } catch {
             lastError = String(describing: error)
             await BridgeLogger.shared.write("Sync failed: \(error)")
@@ -236,6 +333,8 @@ final class BridgeAppModel: ObservableObject {
     }
 
     func setRunAtLogin(_ enabled: Bool) {
+        configuration.runAtLoginEnabled = enabled
+        saveConfiguration()
         do {
             if enabled { try SMAppService.mainApp.register() }
             else { try SMAppService.mainApp.unregister() }
@@ -245,6 +344,13 @@ final class BridgeAppModel: ObservableObject {
             runAtLogin = SMAppService.mainApp.status == .enabled
             lastError = "Run at Login: \(error)"
         }
+    }
+
+    private func applyRunAtLoginPreference() {
+        if configuration.runAtLoginEnabled, SMAppService.mainApp.status != .enabled {
+            try? SMAppService.mainApp.register()
+        }
+        runAtLogin = SMAppService.mainApp.status == .enabled
     }
 
     func openReviewBoard() {
@@ -259,6 +365,71 @@ final class BridgeAppModel: ObservableObject {
 
     func openDiagnosticsFolder() {
         NSWorkspace.shared.activateFileViewerSelecting([BridgePaths.diagnosticsURL])
+    }
+
+    func openSettingsWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+    }
+
+    func openOnboardingWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        if onboardingWindow == nil {
+            let controller = NSHostingController(rootView: OnboardingView(model: self))
+            let window = NSWindow(contentViewController: controller)
+            window.title = "Set Up Bridge"
+            window.styleMask = [.titled, .closable]
+            window.isReleasedWhenClosed = false
+            window.setContentSize(NSSize(width: 540, height: 560))
+            window.center()
+            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    self?.onboardingWindow = nil
+                }
+            }
+            onboardingWindow = window
+        }
+        onboardingWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    func closeOnboardingWindow() {
+        onboardingWindow?.performClose(nil)
+    }
+
+    @discardableResult
+    func refreshAuthentication(loadCatalogIfPossible: Bool = false) async -> Bool {
+        do {
+            let source = makeCliSource()
+            let version = try await source.version()
+            let auth = try await source.authStatus()
+            isAuthenticated = true
+            let versionLine = version.split(separator: "\n").first.map(String.init) ?? "Multica"
+            connectionStatus = "Connected · \(versionLine)\n\(auth)"
+            if loadCatalogIfPossible {
+                await loadWorkspaces()
+                await loadCatalog()
+            }
+            lastError = nil
+            return true
+        } catch {
+            isAuthenticated = false
+            return false
+        }
+    }
+
+    private func pollForAuthentication() async {
+        for _ in 0..<90 {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if Task.isCancelled { return }
+            if await refreshAuthentication(loadCatalogIfPossible: true) { return }
+        }
+    }
+
+    private func handleAppBecameActive() async {
+        guard isConnecting || !isAuthenticated else { return }
+        if await refreshAuthentication(loadCatalogIfPossible: true) {
+            lastError = nil
+        }
     }
 
     private func startNetworkMonitorIfNeeded() {

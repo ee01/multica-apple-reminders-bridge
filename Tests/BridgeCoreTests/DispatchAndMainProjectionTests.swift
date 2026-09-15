@@ -206,6 +206,31 @@ final class DispatchAndMainProjectionTests: XCTestCase {
         XCTAssertEqual(sink.records["recovered-continuation"]?.state, .completed)
     }
 
+    func testMissingAgentDoesNotCreateIssueAndRecordsError() async throws {
+        let route = ProjectRoute(appleListName: "Personal AI", multicaProjectID: "project-1", multicaProjectName: "Personal AI")
+        let source = DispatchFakeSource()
+        let sink = InMemoryReminderSink()
+        sink.requests = [AgentRequestSnapshot(
+            id: "no-agent-1",
+            receipt: ReminderReceipt(calendarItemIdentifier: "apple-no-agent"),
+            listName: route.appleListName,
+            title: "Should stay in Reminders",
+            notes: "",
+            url: nil,
+            dueDate: nil
+        )]
+        let db = try makeDB()
+        let engine = SyncEngine(source: source, sink: sink, persistence: db, configuration: BridgeConfiguration(projectRoutes: [route]))
+
+        let summary = try await engine.sync(now: Date(timeIntervalSince1970: 1000))
+
+        XCTAssertEqual(summary.dispatchedRequests, 0)
+        XCTAssertEqual(await source.createdCount(), 0)
+        XCTAssertTrue(summary.errors.contains(where: { $0.contains("no default Multica agent") }))
+        XCTAssertEqual(try db.request(requestID: "no-agent-1")?.state, .failed)
+        XCTAssertEqual(sink.records["apple-no-agent"]?.state, .pending)
+    }
+
     private func makeDB() throws -> BridgeDatabase {
         let path = FileManager.default.temporaryDirectory.appendingPathComponent("bridge-dispatch-\(UUID().uuidString).sqlite").path
         let db = try BridgeDatabase(path: path)

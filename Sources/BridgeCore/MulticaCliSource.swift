@@ -29,7 +29,14 @@ public struct MulticaCliSource<Runner: CommandRunning>: MulticaSource, Sendable 
 
     public func authStatus() async throws -> String {
         let result = try await run(["auth", "status"])
-        return result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        let status = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = status.lowercased()
+        if normalized.contains("not authenticated")
+            || normalized.contains("session has expired")
+            || normalized.contains("not signed in") {
+            throw MulticaSourceError.notAuthenticated(status)
+        }
+        return status
     }
 
     public func version() async throws -> String {
@@ -70,6 +77,20 @@ public struct MulticaCliSource<Runner: CommandRunning>: MulticaSource, Sendable 
         let result = try await run(args)
         do { return try MulticaJSONParser.parseRuns(Data(result.stdout.utf8)) }
         catch { throw MulticaSourceError.malformedOutput(String(describing: error)) }
+    }
+
+    public func fetchRecentMemberComments(issueIDOrKey: String, limit: Int) async throws -> [String] {
+        var args = ["issue", "comment", "list", issueIDOrKey, "--recent", "8", "--summary", "--compact", "--output", "json"]
+        args.append(contentsOf: workspaceArguments())
+        let result = try await run(args)
+        let comments: [IssueComment]
+        do { comments = try MulticaJSONParser.parseComments(Data(result.stdout.utf8)) }
+        catch { throw MulticaSourceError.malformedOutput(String(describing: error)) }
+        let human = comments
+            .filter(\.isHumanAuthor)
+            .filter { !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
+        return Array(human.prefix(max(1, limit)).reversed().map(\.content))
     }
 
     public func createIssue(_ request: IssueCreateRequest) async throws -> IssueSnapshot {
@@ -152,10 +173,20 @@ public struct MulticaCliSource<Runner: CommandRunning>: MulticaSource, Sendable 
     }
 
     public func listAgents() async throws -> [MulticaAgent] {
-        var args = ["agent", "list", "--full-id", "--output", "json"]
+        // JSON already includes full UUIDs. `--full-id` is a table-only flag and
+        // recent CLI releases reject it on `agent list`.
+        var args = ["agent", "list", "--output", "json"]
         args.append(contentsOf: workspaceArguments())
         let result = try await run(args)
         do { return try MulticaJSONParser.parseAgents(Data(result.stdout.utf8)) }
+        catch { throw MulticaSourceError.malformedOutput(String(describing: error)) }
+    }
+
+    public func listSquads() async throws -> [MulticaAgent] {
+        var args = ["squad", "list", "--output", "json"]
+        args.append(contentsOf: workspaceArguments())
+        let result = try await run(args)
+        do { return try MulticaJSONParser.parseSquads(Data(result.stdout.utf8)) }
         catch { throw MulticaSourceError.malformedOutput(String(describing: error)) }
     }
 
@@ -166,7 +197,11 @@ public struct MulticaCliSource<Runner: CommandRunning>: MulticaSource, Sendable 
     }
 
     public func login() async throws {
-        // Login only creates/refreshes this CLI profile. It never starts a daemon.
+        // Newer CLI releases require both URLs to be persisted before OAuth
+        // login. `config set` only updates this isolated profile; it does not
+        // configure or start the local runtime daemon.
+        _ = try await run(["config", "set", "server_url", configuration.appBaseURL])
+        _ = try await run(["config", "set", "app_url", configuration.appBaseURL])
         _ = try await run(["login"], timeout: 300)
     }
 
@@ -177,7 +212,13 @@ public struct MulticaCliSource<Runner: CommandRunning>: MulticaSource, Sendable 
     }
 
     private func run(_ commandArguments: [String], timeout: TimeInterval? = nil) async throws -> CommandResult {
-        let args = commandArguments + ["--profile", configuration.multicaProfile]
+        // Recent Multica CLI releases require each isolated profile to have a
+        // server configured before `login` can run. Supplying the Cloud URL
+        // explicitly keeps this profile daemon-free and avoids `multica setup`.
+        let args = commandArguments + [
+            "--profile", configuration.multicaProfile,
+            "--server-url", configuration.appBaseURL
+        ]
         do {
             return try await runner.run(executable: configuration.multicaCLIPath, arguments: args, timeout: timeout ?? commandTimeout)
         } catch let error as CommandRunnerError {

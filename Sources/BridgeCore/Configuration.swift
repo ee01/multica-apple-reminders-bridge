@@ -25,7 +25,9 @@ public struct BridgeConfiguration: Codable, Equatable, Sendable {
     public var requestDispatchEnabled: Bool
 
     public var reminderAlarmEnabled: Bool
+    public var reminderAlarmSchedule: HumanAlarmSchedule
     public var reminderAlarmDelaySeconds: TimeInterval
+    public var runAtLoginEnabled: Bool
     public var pollIntervalSeconds: TimeInterval
     public var issuePageSize: Int
     public var maxRunHydrationPerSync: Int
@@ -51,7 +53,9 @@ public struct BridgeConfiguration: Codable, Equatable, Sendable {
         defaultAgentName: String? = nil,
         requestDispatchEnabled: Bool = true,
         reminderAlarmEnabled: Bool = true,
-        reminderAlarmDelaySeconds: TimeInterval = 60,
+        reminderAlarmSchedule: HumanAlarmSchedule = .after1Minute,
+        reminderAlarmDelaySeconds: TimeInterval? = nil,
+        runAtLoginEnabled: Bool = true,
         pollIntervalSeconds: TimeInterval = 180,
         issuePageSize: Int = 100,
         maxRunHydrationPerSync: Int = 30,
@@ -76,7 +80,16 @@ public struct BridgeConfiguration: Codable, Equatable, Sendable {
         self.defaultAgentName = defaultAgentName
         self.requestDispatchEnabled = requestDispatchEnabled
         self.reminderAlarmEnabled = reminderAlarmEnabled
-        self.reminderAlarmDelaySeconds = reminderAlarmDelaySeconds
+        if let delay = reminderAlarmDelaySeconds {
+            self.reminderAlarmDelaySeconds = delay
+            self.reminderAlarmSchedule = reminderAlarmSchedule == .after1Minute
+                ? HumanAlarmSchedule.inferred(fromDelaySeconds: delay)
+                : reminderAlarmSchedule
+        } else {
+            self.reminderAlarmSchedule = reminderAlarmSchedule
+            self.reminderAlarmDelaySeconds = reminderAlarmSchedule.legacyDelaySeconds
+        }
+        self.runAtLoginEnabled = runAtLoginEnabled
         self.pollIntervalSeconds = pollIntervalSeconds
         self.issuePageSize = issuePageSize
         self.maxRunHydrationPerSync = maxRunHydrationPerSync
@@ -92,12 +105,14 @@ public struct BridgeConfiguration: Codable, Equatable, Sendable {
     public var reminderListName: String { genericRequestListName }
 
     public var requestListNames: Set<String> {
-        Set([genericRequestListName] + projectRoutes.map(\.appleListName))
+        Set(([genericRequestListName] + projectRoutes.map(\.appleListName))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty })
     }
 
     public func route(forAppleList name: String) -> ProjectRoute? {
-        if let exact = projectRoutes.first(where: { $0.appleListName == name }) { return exact }
-        guard name == genericRequestListName else { return nil }
+        if let exact = projectRoutes.first(where: { Self.listNamesMatch($0.appleListName, name) }) { return exact }
+        guard Self.listNamesMatch(name, genericRequestListName) else { return nil }
         return ProjectRoute(
             id: "default",
             appleListName: genericRequestListName,
@@ -120,7 +135,7 @@ public struct BridgeConfiguration: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case multicaCLIPath, multicaProfile, workspaceID, workspaceSlug, appBaseURL
         case genericRequestListName, projectRoutes, defaultMirrorMode, defaultProjectID, defaultProjectName, defaultAgentID, defaultAgentName, requestDispatchEnabled
-        case reminderListName, reminderAlarmEnabled, reminderAlarmDelaySeconds
+        case reminderListName, reminderAlarmEnabled, reminderAlarmSchedule, reminderAlarmDelaySeconds, runAtLoginEnabled
         case pollIntervalSeconds, issuePageSize, maxRunHydrationPerSync, blockedGraceSeconds
         case failureRemindersEnabled, reviewCompletionBehavior, suppressionLabels, urgentLabels, alwaysLabels
     }
@@ -143,7 +158,15 @@ public struct BridgeConfiguration: Codable, Equatable, Sendable {
         self.defaultAgentName = try c.decodeIfPresent(String.self, forKey: .defaultAgentName)
         self.requestDispatchEnabled = try c.decodeIfPresent(Bool.self, forKey: .requestDispatchEnabled) ?? true
         self.reminderAlarmEnabled = try c.decodeIfPresent(Bool.self, forKey: .reminderAlarmEnabled) ?? true
-        self.reminderAlarmDelaySeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .reminderAlarmDelaySeconds) ?? 60
+        if let schedule = try c.decodeIfPresent(HumanAlarmSchedule.self, forKey: .reminderAlarmSchedule) {
+            self.reminderAlarmSchedule = schedule
+            self.reminderAlarmDelaySeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .reminderAlarmDelaySeconds) ?? schedule.legacyDelaySeconds
+        } else {
+            let delay = try c.decodeIfPresent(TimeInterval.self, forKey: .reminderAlarmDelaySeconds) ?? 60
+            self.reminderAlarmSchedule = HumanAlarmSchedule.inferred(fromDelaySeconds: delay)
+            self.reminderAlarmDelaySeconds = delay
+        }
+        self.runAtLoginEnabled = try c.decodeIfPresent(Bool.self, forKey: .runAtLoginEnabled) ?? true
         self.pollIntervalSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .pollIntervalSeconds) ?? 180
         self.issuePageSize = try c.decodeIfPresent(Int.self, forKey: .issuePageSize) ?? 100
         self.maxRunHydrationPerSync = try c.decodeIfPresent(Int.self, forKey: .maxRunHydrationPerSync) ?? 30
@@ -172,7 +195,9 @@ public struct BridgeConfiguration: Codable, Equatable, Sendable {
         try c.encodeIfPresent(defaultAgentName, forKey: .defaultAgentName)
         try c.encode(requestDispatchEnabled, forKey: .requestDispatchEnabled)
         try c.encode(reminderAlarmEnabled, forKey: .reminderAlarmEnabled)
+        try c.encode(reminderAlarmSchedule, forKey: .reminderAlarmSchedule)
         try c.encode(reminderAlarmDelaySeconds, forKey: .reminderAlarmDelaySeconds)
+        try c.encode(runAtLoginEnabled, forKey: .runAtLoginEnabled)
         try c.encode(pollIntervalSeconds, forKey: .pollIntervalSeconds)
         try c.encode(issuePageSize, forKey: .issuePageSize)
         try c.encode(maxRunHydrationPerSync, forKey: .maxRunHydrationPerSync)
@@ -195,5 +220,10 @@ public struct BridgeConfiguration: Codable, Equatable, Sendable {
         let data = try encoder.encode(self)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
+    }
+
+    public static func listNamesMatch(_ lhs: String, _ rhs: String) -> Bool {
+        lhs.trimmingCharacters(in: .whitespacesAndNewlines)
+            .caseInsensitiveCompare(rhs.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame
     }
 }

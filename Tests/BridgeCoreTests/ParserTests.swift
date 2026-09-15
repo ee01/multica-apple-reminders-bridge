@@ -38,6 +38,20 @@ final class ParserTests: XCTestCase {
         XCTAssertThrowsError(try MulticaJSONParser.parseIssues(Data("nope".utf8)))
     }
 
+    func testParsesAgentsAndSquadsFromJSONArrays() throws {
+        let agents = try MulticaJSONParser.parseAgents(Data(#"[{"id":"a1","name":"Mika"},{"id":"a2","title":"Docs"}]"#.utf8))
+        XCTAssertEqual(agents.map(\.id), ["a1", "a2"])
+        XCTAssertEqual(agents.map(\.name), ["Mika", "Docs"])
+        XCTAssertTrue(agents.allSatisfy { $0.kind == .agent })
+
+        let squads = try MulticaJSONParser.parseSquads(Data(#"{"squads":[{"id":"s1","name":"Personal AI Team"}]}"#.utf8))
+        XCTAssertEqual(squads.count, 1)
+        XCTAssertEqual(squads[0].id, "s1")
+        XCTAssertEqual(squads[0].name, "Personal AI Team")
+        XCTAssertEqual(squads[0].kind, .squad)
+        XCTAssertEqual(squads[0].menuTitle, "Personal AI Team (Squad)")
+    }
+
     private func fixture(_ name: String) -> URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

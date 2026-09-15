@@ -6,13 +6,11 @@ struct MulticaRemindersBridgeApp: App {
     @StateObject private var model = BridgeAppModel()
 
     var body: some Scene {
-        MenuBarExtra("Multica Bridge", systemImage: "checklist.checked") {
+        MenuBarExtra("Multica Bridge", systemImage: model.menuBarSymbol) {
             MenuBarView(model: model)
-                .task { model.start() }
         }
         Settings {
             SettingsView(model: model)
-                .task { model.start() }
         }
     }
 }

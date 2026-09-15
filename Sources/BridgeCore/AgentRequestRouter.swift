@@ -22,13 +22,23 @@ public struct AgentRequestRouter: Sendable {
     }
 
     public func route(_ request: AgentRequestSnapshot) throws -> ProjectRoute {
-        guard let route = projectionPolicy.routeForRequest(listName: request.listName) else {
+        guard var route = projectionPolicy.routeForRequest(listName: request.listName) else {
             throw RequestRoutingError.noRoute(request.listName)
         }
-        guard route.defaultAgentID?.isEmpty == false else {
+        if Self.trimmed(route.defaultAgentID) == nil {
+            route.defaultAgentID = configuration.defaultAgentID
+            route.defaultAgentName = configuration.defaultAgentName
+        }
+        guard Self.trimmed(route.defaultAgentID) != nil else {
             throw RequestRoutingError.missingAgent(request.listName)
         }
         return route
+    }
+
+    private static func trimmed(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     public func existingIssueReference(from url: URL?) -> String? {

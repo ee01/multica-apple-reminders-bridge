@@ -14,7 +14,8 @@ public struct MulticaDeepLinkBuilder: Sendable {
         let slug = issue.workspaceSlug ?? configuredWorkspaceSlug
         if let slug, !slug.isEmpty { base.appendPathComponent(slug) }
         base.appendPathComponent("issues")
-        base.appendPathComponent(issue.id)
+        let pathID = issue.key.trimmingCharacters(in: .whitespacesAndNewlines)
+        base.appendPathComponent(pathID.isEmpty ? issue.id : pathID)
         return base
     }
 }
@@ -22,12 +23,12 @@ public struct MulticaDeepLinkBuilder: Sendable {
 public struct ReminderFormatter: Sendable {
     public let deepLinks: MulticaDeepLinkBuilder
     private let alarmEnabled: Bool
-    private let alarmDelay: TimeInterval
+    private let alarmSchedule: HumanAlarmSchedule
 
     public init(configuration: BridgeConfiguration) {
         self.deepLinks = MulticaDeepLinkBuilder(appBaseURL: configuration.appBaseURL, configuredWorkspaceSlug: configuration.workspaceSlug)
         self.alarmEnabled = configuration.reminderAlarmEnabled
-        self.alarmDelay = max(0, configuration.reminderAlarmDelaySeconds)
+        self.alarmSchedule = configuration.reminderAlarmSchedule
     }
 
     public func makeItem(issue: IssueSnapshot, decision: AttentionDecision, generation: Int, listName: String, now: Date) -> ReminderItem {
@@ -42,24 +43,33 @@ public struct ReminderFormatter: Sendable {
 
         let reasonLine: String
         switch decision.reason {
-        case .reviewRequired: reasonLine = "Agent 已交付结果，等待人工 Review。"
-        case .blockedRequiresHuman: reasonLine = "任务处于 Blocked，自动化不会自行继续，需要人工介入。"
-        case .failedRequiresHuman: reasonLine = "最近一次 Agent Run 已失败，且当前没有新的活动重试。"
-        case .explicitAlways: reasonLine = "该任务被显式标记为需要人工关注。"
-        default: reasonLine = "该任务需要人工处理。"
+        case .reviewRequired: reasonLine = "Agent 已交付，等待你 Review。"
+        case .blockedRequiresHuman: reasonLine = "任务被 Blocked，需要你处理。"
+        case .failedRequiresHuman: reasonLine = "最近一次 Agent Run 失败，且没有新的重试。"
+        case .explicitAlways: reasonLine = "该任务被标记为需要你关注。"
+        default: reasonLine = "该任务需要你处理。"
         }
 
         var lines: [String] = [issue.key, reasonLine]
-        if let project = issue.projectName { lines.insert("Project: \(project)", at: 1) }
-        if let agent = issue.assigneeName ?? issue.latestRun?.agentName { lines.insert("Agent: \(agent)", at: min(2, lines.count)) }
-        if let summary = compact(issue.summary, max: 420), !summary.isEmpty { lines.append(""); lines.append(summary) }
-        if let run = issue.latestRun {
+
+        let asks = issue.recentMemberAsks.map { compact($0, max: 240) }.compactMap { $0 }.filter { !$0.isEmpty }
+        if !asks.isEmpty {
             lines.append("")
-            lines.append("Latest run: \(run.status.rawValue)")
-            if let reason = run.failureReasonCode, !reason.isEmpty { lines.append("Failure reason: \(reason)") }
-            if let error = compact(run.errorMessage, max: 300), !error.isEmpty { lines.append("Error: \(error)") }
+            lines.append("Latest from you:")
+            lines.append(contentsOf: asks)
+        } else if let context = compact(issue.issueDescription ?? issue.summary, max: 280), !context.isEmpty {
+            lines.append("")
+            lines.append("What this is:")
+            lines.append(context)
         }
-        if generation > 1 { lines.append("Human action cycle: #\(generation)") }
+
+        if let project = issue.projectName { lines.append(""); lines.append("Project: \(project)") }
+        if let agent = issue.assigneeName ?? issue.latestRun?.agentName { lines.append("Agent: \(agent)") }
+        if generation > 1 { lines.append("Review round: #\(generation)") }
+        if decision.reason == .failedRequiresHuman, let run = issue.latestRun {
+            if let reason = run.failureReasonCode, !reason.isEmpty { lines.append("Failure: \(reason)") }
+            if let error = compact(run.errorMessage, max: 220), !error.isEmpty { lines.append("Error: \(error)") }
+        }
 
         _ = actionKind // Kept here to make the title/reason mapping explicit; projection stores it separately.
         return ReminderItem(
@@ -73,7 +83,7 @@ public struct ReminderFormatter: Sendable {
             url: deepLinks.issueURL(issue),
             priority: decision.severity,
             dueDate: nil,
-            alarmDate: alarmEnabled ? now.addingTimeInterval(alarmDelay) : nil
+            alarmDate: alarmEnabled ? alarmSchedule.alarmDate(from: now) : nil
         )
     }
 
@@ -91,7 +101,13 @@ public struct ReminderFormatter: Sendable {
 
     private func compact(_ raw: String?, max: Int) -> String? {
         guard let raw else { return nil }
-        let normalized = raw.replacingOccurrences(of: "\r\n", with: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        var normalized = raw.replacingOccurrences(of: "\r\n", with: "\n")
+        normalized = normalized.replacingOccurrences(of: #"(?m)^#{1,6}\s+"#, with: "", options: .regularExpression)
+        while normalized.contains("\n\n\n") {
+            normalized = normalized.replacingOccurrences(of: "\n\n\n", with: "\n\n")
+        }
+        normalized = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
         guard normalized.count > max else { return normalized }
         return String(normalized.prefix(max - 1)) + "…"
     }

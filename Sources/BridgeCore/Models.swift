@@ -114,6 +114,29 @@ public struct RunSnapshot: Codable, Equatable, Sendable {
     }
 }
 
+public struct IssueComment: Codable, Equatable, Sendable, Identifiable {
+    public let id: String
+    public let authorType: String
+    public let content: String
+    public let createdAt: Date?
+    public let parentID: String?
+
+    public init(id: String, authorType: String, content: String, createdAt: Date? = nil, parentID: String? = nil) {
+        self.id = id
+        self.authorType = authorType
+        self.content = content
+        self.createdAt = createdAt
+        self.parentID = parentID
+    }
+
+    public var isHumanAuthor: Bool {
+        switch authorType.lowercased() {
+        case "member", "user", "human", "person": return true
+        default: return false
+        }
+    }
+}
+
 public struct IssueSnapshot: Codable, Equatable, Sendable, Identifiable {
     public let id: String
     public let key: String
@@ -129,9 +152,11 @@ public struct IssueSnapshot: Codable, Equatable, Sendable, Identifiable {
     public let updatedAt: Date?
     public let dueDate: Date?
     public let summary: String?
+    public let issueDescription: String?
     public var latestRun: RunSnapshot?
+    public var recentMemberAsks: [String]
 
-    public init(id: String, key: String, title: String, statusName: String, statusCategory: IssueStatusCategory, priority: IssuePriority = .none, labels: Set<String> = [], assigneeName: String? = nil, projectID: String? = nil, projectName: String? = nil, workspaceSlug: String? = nil, updatedAt: Date? = nil, dueDate: Date? = nil, summary: String? = nil, latestRun: RunSnapshot? = nil) {
+    public init(id: String, key: String, title: String, statusName: String, statusCategory: IssueStatusCategory, priority: IssuePriority = .none, labels: Set<String> = [], assigneeName: String? = nil, projectID: String? = nil, projectName: String? = nil, workspaceSlug: String? = nil, updatedAt: Date? = nil, dueDate: Date? = nil, summary: String? = nil, issueDescription: String? = nil, latestRun: RunSnapshot? = nil, recentMemberAsks: [String] = []) {
         self.id = id
         self.key = key
         self.title = title
@@ -146,7 +171,9 @@ public struct IssueSnapshot: Codable, Equatable, Sendable, Identifiable {
         self.updatedAt = updatedAt
         self.dueDate = dueDate
         self.summary = summary
+        self.issueDescription = issueDescription
         self.latestRun = latestRun
+        self.recentMemberAsks = recentMemberAsks
     }
 }
 
@@ -156,16 +183,64 @@ public struct MulticaProject: Codable, Equatable, Sendable, Identifiable {
     public init(id: String, name: String) { self.id = id; self.name = name }
 }
 
+public enum MulticaAssigneeKind: String, Codable, Sendable {
+    case agent
+    case squad
+}
+
 public struct MulticaAgent: Codable, Equatable, Sendable, Identifiable {
     public let id: String
     public let name: String
-    public init(id: String, name: String) { self.id = id; self.name = name }
+    public let kind: MulticaAssigneeKind
+
+    public init(id: String, name: String, kind: MulticaAssigneeKind = .agent) {
+        self.id = id
+        self.name = name
+        self.kind = kind
+    }
+
+    public var menuTitle: String {
+        switch kind {
+        case .agent: return name
+        case .squad: return "\(name) (Squad)"
+        }
+    }
+}
+
+public extension Array where Element == MulticaAgent {
+    /// Workspace default for new users: Mika when present, otherwise the first Agent, then any Squad.
+    func preferredDefaultAssignee() -> MulticaAgent? {
+        let agentsOnly = filter { $0.kind == .agent }
+        if let mika = agentsOnly.first(where: { $0.name.caseInsensitiveCompare("Mika") == .orderedSame }) {
+            return mika
+        }
+        return agentsOnly.first ?? first
+    }
 }
 
 public enum MirrorMode: String, Codable, CaseIterable, Hashable, Sendable {
     case allActive = "all_active"
     case appleOriginOnly = "apple_origin_only"
     case attentionOnly = "attention_only"
+
+    public var displayName: String {
+        switch self {
+        case .appleOriginOnly: return "Only tasks started in Reminders"
+        case .allActive: return "Keep a Reminder for every active issue"
+        case .attentionOnly: return "Only when I need to act"
+        }
+    }
+
+    public var helpText: String {
+        switch self {
+        case .appleOriginOnly:
+            return "Keeps a Main Reminder for work you start in Apple Reminders. Issues created in Multica stay in Multica unless they need your review or action."
+        case .allActive:
+            return "Creates a Main Reminder for every active issue in this Multica project, including work started in Multica."
+        case .attentionOnly:
+            return "Does not keep Main Reminders. Only creates Review, Action Required, or Failed alerts when you need to act."
+        }
+    }
 }
 
 public struct ProjectRoute: Codable, Equatable, Sendable, Identifiable {
@@ -469,6 +544,7 @@ public struct IssueCreateRequest: Codable, Equatable, Sendable {
 
 public struct SyncSummary: Codable, Equatable, Sendable {
     public var fetchedIssues: Int = 0
+    public var scannedRequests: Int = 0
     public var dispatchedRequests: Int = 0
     public var continuedRequests: Int = 0
     public var mainCreatedOrUpdated: Int = 0

@@ -13,7 +13,7 @@ public struct MainReminderFormatter: Sendable {
         if let assignee = issue.assigneeName ?? issue.latestRun?.agentName { lines.append("Agent: \(assignee)") }
         lines.append("Status: \(issue.statusName)")
         if let due = issue.dueDate { lines.append("Multica due: \(ISO8601DateFormatter().string(from: due))") }
-        if let summary = compact(issue.summary, max: 360), !summary.isEmpty {
+        if let summary = compact(issue.summary ?? issue.issueDescription, max: 360), !summary.isEmpty {
             lines.append("")
             lines.append(summary)
         }

@@ -29,6 +29,8 @@
   ],
   "reminderAlarmDelaySeconds": 60,
   "reminderAlarmEnabled": true,
+  "reminderAlarmSchedule": "after_1_minute",
+  "runAtLoginEnabled": true,
   "requestDispatchEnabled": true,
   "reviewCompletionBehavior": "close_issue",
   "suppressionLabels": [

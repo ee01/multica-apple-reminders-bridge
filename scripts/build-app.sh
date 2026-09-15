@@ -20,6 +20,7 @@ rm -rf "$APP_DIR"
 mkdir -p "$MACOS" "$RESOURCES"
 cp "$BIN_DIR/MulticaRemindersBridge" "$MACOS/MulticaRemindersBridge"
 cp "$ROOT/resources/Info.plist" "$CONTENTS/Info.plist"
+cp "$ROOT/resources/AppIcon.icns" "$RESOURCES/AppIcon.icns"
 chmod +x "$MACOS/MulticaRemindersBridge"
 
 if command -v codesign >/dev/null 2>&1; then

@@ -29,8 +29,16 @@ public final class SyncEngine: @unchecked Sendable {
         if configuration.requestDispatchEnabled {
             do {
                 // First-run bootstrap: users do not have to pre-create Agent Requests or
-                // project route lists manually in Reminders.app.
-                try await sink.ensureLists(configuration.requestListNames)
+                // project route lists manually in Reminders.app. Create lists one-by-one so
+                // a stuck EventKit save cannot skip the remaining lists.
+                for name in configuration.requestListNames.sorted() {
+                    do { try await sink.ensureLists([name]) }
+                    catch { summary.errors.append("Could not open Reminders list “\(name)”: \(error)") }
+                }
+                let missing = await sink.unavailableLists(in: configuration.requestListNames)
+                for name in missing {
+                    summary.errors.append("Apple Reminders list “\(name)” is missing, so new reminders there were not dispatched. Create that list or pick an existing one in Settings.")
+                }
                 try await dispatchAppleRequests(now: now, summary: &summary)
             } catch { summary.errors.append("dispatch requests: \(error)") }
         }
@@ -65,6 +73,7 @@ public final class SyncEngine: @unchecked Sendable {
 
     private func dispatchAppleRequests(now: Date, summary: inout SyncSummary) async throws {
         let requests = try await sink.scanRequests(in: configuration.requestListNames)
+        summary.scannedRequests = requests.count
         for request in requests {
             do {
                 if let existing = try persistence.request(requestID: request.id),
@@ -375,6 +384,12 @@ public final class SyncEngine: @unchecked Sendable {
     /// Returns true when completing the current Review sibling successfully closes the
     /// Multica Issue. Action Required / Failed siblings are always acknowledge-only.
     private func reconcileHumanAction(issue: IssueSnapshot, binding: IssueBinding, decision: AttentionDecision, generation: Int, now: Date, summary: inout SyncSummary) async throws -> Bool {
+        var issue = issue
+        do {
+            issue.recentMemberAsks = try await source.fetchRecentMemberComments(issueIDOrKey: issue.key, limit: 2)
+        } catch {
+            summary.errors.append("\(issue.key) comments: \(error)")
+        }
         let item = attentionFormatter.makeItem(issue: issue, decision: decision, generation: generation, listName: binding.appleListName, now: now)
         let hash = attentionFormatter.payloadHash(item)
         var projection = try persistence.projection(issueID: issue.id, kind: .humanAction, generation: generation)
