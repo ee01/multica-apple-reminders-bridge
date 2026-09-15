@@ -1,4 +1,4 @@
-.PHONY: build test verify mac-app install secrets clean
+.PHONY: build test verify mac-app install secrets release clean
 
 build:
 	swift build
@@ -17,6 +17,9 @@ mac-app:
 
 install:
 	./scripts/install.sh
+
+release:
+	npm run deploy
 
 clean:
 	rm -rf .build dist

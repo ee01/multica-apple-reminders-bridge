@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 - 2026-09-15
+
+- Add first-run onboarding wizard with setup checklist for Multica login, workspace, and Reminders permission.
+- Streamline Settings with setup guidance, assignee pickers, and improved project route editing.
+- Add configurable Human Action alarm schedules (immediate, delayed, next morning at 9:00).
+- Add `runAtLoginEnabled` setting and app icon assets.
+- Improve Reminder notes/deep links and case-insensitive Apple List name matching.
+- Package macOS releases as downloadable `.zip` assets on GitHub Releases.
+- Add `npm run deploy` / `make release` for local build-and-publish workflow.
+
 ## 0.3.0 - 2026-09-13
 
 - Collapse user-facing Human Action taxonomy to **Review / Action Required / Failed**.

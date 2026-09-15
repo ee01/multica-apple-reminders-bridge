@@ -24,6 +24,12 @@ multica login --profile reminders-bridge
 
 ## 3. Build / Install
 
+### 下载发布包（推荐）
+
+在 [GitHub Releases](https://github.com/ee01/multica-apple-reminders-bridge/releases) 下载最新的 `Multica-Reminders-Bridge-v*-macos.zip`，解压后将 `Multica Reminders Bridge.app` 拖入 `Applications` 或 `~/Applications`。
+
+### 本地构建
+
 macOS 14+：
 
 ```bash
@@ -41,6 +47,16 @@ make mac-app
 ```text
 ~/Applications/Multica Reminders Bridge.app
 ```
+
+### 发布新版本（维护者）
+
+在 macOS 上提交并推送所有变更后：
+
+```bash
+npm run deploy
+```
+
+该命令会运行测试、构建 `.app`、打包 zip，并创建/更新对应版本的 GitHub Release。
 
 ## 4. 首次设置
 
