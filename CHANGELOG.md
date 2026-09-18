@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.0 - 2026-09-18
+
+First stable release.
+
+- Action Required (blocked) reminders always notify immediately, independent of the configurable alarm schedule.
+- Fix Settings and onboarding windows not coming to the foreground in menu-bar agent mode.
+- Add `AppWindowPresenter` to temporarily promote the app while user windows are open.
+- Auto-detect Apple Development signing identity to preserve Reminders permission across local rebuilds.
+- Document Reminders TCC behavior and stable local signing in installation/testing guides.
+- Save configuration when removing a project route.
+
 ## 0.4.0 - 2026-09-15
 
 - Add first-run onboarding wizard with setup checklist for Multica login, workspace, and Reminders permission.

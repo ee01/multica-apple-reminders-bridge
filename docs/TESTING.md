@@ -39,6 +39,19 @@ make verify
 
 实际最终数量见 `VERIFICATION.md`。
 
+### 为什么 `swift test` 不需要 Reminders 授权
+
+单元测试使用 `InMemoryReminderSink` 模拟 Reminder 读写，不调用 EventKit，因此在 Linux CI 和未授权 Reminders 的本机都能跑。涉及真实 Apple Reminders / TCC / iCloud 的行为只能在 macOS 上人工或通过 E2E 脚本辅助验证。
+
+### 本地反复安装与 Reminders 授权
+
+`make install` 会触发 `build-app.sh` 重新签名应用。若使用 ad-hoc 签名，macOS 可能把每次构建视为新应用，导致 Reminders 授权失效。本地开发建议：
+
+1. 在 Xcode 登录 Apple ID，让 `build-app.sh` 自动选用 `Apple Development` 证书；或
+2. 设置 `SIGN_IDENTITY="Apple Development: …"` 后执行 `make install`。
+
+详见 `docs/INSTALLATION.md` 中「Reminders 授权与本地重构建」。
+
 ## macOS E2E
 
 ```bash

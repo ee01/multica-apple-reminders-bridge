@@ -21,7 +21,7 @@ struct MenuBarView: View {
                 }.disabled(model.isSyncing)
                 Button("Open Multica Reviews") { model.openReviewBoard() }
             }
-            SettingsLink { Text("Settings…") }
+            Button("Settings…") { model.openSettingsWindow() }
             Divider()
             Button("Quit") { NSApplication.shared.terminate(nil) }
         }

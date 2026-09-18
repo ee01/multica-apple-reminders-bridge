@@ -152,7 +152,7 @@ struct SettingsView: View {
                 }
                 Toggle("Notify when a Review / Action Required / Failed Reminder is created", isOn: $model.configuration.reminderAlarmEnabled)
                 if model.configuration.reminderAlarmEnabled {
-                    Picker("Notify me", selection: Binding(
+                    Picker("Notify me (Review / Failed)", selection: Binding(
                         get: { model.configuration.reminderAlarmSchedule },
                         set: { schedule in
                             model.configuration.reminderAlarmSchedule = schedule
@@ -202,6 +202,9 @@ struct SettingsView: View {
                 Stepper(value: $model.configuration.blockedGraceSeconds, in: 0...7200, step: 60) {
                     Text("Wait \(Int(model.configuration.blockedGraceSeconds / 60)) minutes before a blocked issue becomes Action Required")
                 }
+                Text("Debounce for brief blocked states. If Multica starts a recovery run or leaves blocked on its own, Bridge will not create Action Required.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Text("Suppression labels: \(model.configuration.suppressionLabels.sorted().joined(separator: ", "))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -256,13 +259,12 @@ private struct ProjectRouteEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top) {
-                AppleListField(title: "Apple list", listName: $route.appleListName, existingLists: appleLists)
+            HStack {
+                Spacer()
                 Button(role: .destructive, action: onRemove) {
-                    Image(systemName: "trash")
+                    Label("Remove route", systemImage: "trash")
                 }
-                .buttonStyle(.borderless)
-                .padding(.top, 22)
+                .buttonStyle(.plain)
             }
 
             CatalogPicker(
@@ -278,6 +280,8 @@ private struct ProjectRouteEditor: View {
                 },
                 onReload: onReloadCatalog
             )
+
+            AppleListField(title: "Apple list", listName: $route.appleListName, existingLists: appleLists)
 
             AssigneePicker(
                 title: "Who runs these tasks",

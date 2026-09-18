@@ -76,6 +76,39 @@ final class ReminderNotesTests: XCTestCase {
         XCTAssertFalse(item.notes.contains("## User request"))
     }
 
+    func testNotifyMeScheduleAppliesToReviewAndFailedButNotBlocked() {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let configuration = BridgeConfiguration(reminderAlarmSchedule: .after1Hour, reminderAlarmDelaySeconds: 3_600)
+        let formatter = ReminderFormatter(configuration: configuration)
+        let issue = IssueSnapshot(id: "1", key: "MUL-1", title: "Need input", statusName: "blocked", statusCategory: .blocked)
+
+        let review = formatter.makeItem(
+            issue: issue,
+            decision: AttentionDecision(action: .createOrUpdateReminder, reason: .reviewRequired),
+            generation: 1,
+            listName: "Agent Requests",
+            now: now
+        )
+        let blocked = formatter.makeItem(
+            issue: issue,
+            decision: AttentionDecision(action: .createOrUpdateReminder, reason: .blockedRequiresHuman),
+            generation: 1,
+            listName: "Agent Requests",
+            now: now
+        )
+        let failed = formatter.makeItem(
+            issue: issue,
+            decision: AttentionDecision(action: .createOrUpdateReminder, reason: .failedRequiresHuman),
+            generation: 1,
+            listName: "Agent Requests",
+            now: now
+        )
+
+        XCTAssertEqual(review.alarmDate, now.addingTimeInterval(3_600))
+        XCTAssertEqual(blocked.alarmDate, now)
+        XCTAssertEqual(failed.alarmDate, now.addingTimeInterval(3_600))
+    }
+
     func testParsesMemberCommentsNewestFirstThenReturnsChronologicalAsks() throws {
         let json = """
         [

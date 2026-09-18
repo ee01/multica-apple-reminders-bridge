@@ -58,13 +58,14 @@ Identity：
 
 Main Reminder 不设置 Bridge-managed attention alarm。
 
-Human Action sibling 默认：
+Human Action sibling:
 
 ```text
-alarm = now + reminderAlarmDelaySeconds
+Review / Failed: alarm = reminderAlarmSchedule (Notify me)
+Action Required (blocked / reminder-always): alarm = now
 ```
 
-默认 60 秒，可关闭/调整。Multica due date 与“现在提醒我 Review”是两个不同概念，本版本不把 Main due date 当作 human-attention alarm。
+Main Reminder 不设置 Bridge-managed attention alarm。默认 Review delay 是 60 秒，可关闭/调整；blocked 不受这个设置影响。Multica due date 与“现在提醒我 Review”是两个不同概念，本版本不把 Main due date 当作 human-attention alarm。
 
 ## Apple completion semantics
 

@@ -48,6 +48,33 @@ make mac-app
 ~/Applications/Multica Reminders Bridge.app
 ```
 
+### Reminders 授权与本地重构建
+
+macOS 把「提醒事项」权限绑定在**应用的代码签名**上，而不只是 Bundle ID。每次 `make install` 都会重新构建并签名 `.app`：
+
+- **ad-hoc 签名**（本机没有开发证书时的默认行为）：每次构建签名都会变，系统可能要求你重新授权 Reminders。
+- **开发证书签名**（推荐）：`build-app.sh` 会自动检测本机 `Apple Development` 证书；同一证书下反复 `make install` 通常**不需要**重新授权。
+
+一次性准备（在 Xcode 中登录 Apple ID，或已有开发证书）后，直接 `make install` 即可。也可手动指定：
+
+```bash
+SIGN_IDENTITY="Apple Development: Your Name (TEAMID)" make install
+```
+
+查看本机可用证书：
+
+```bash
+security find-identity -v -p codesigning
+```
+
+调试时若要跳过签名（不推荐，Reminders 授权更不稳定）：
+
+```bash
+SKIP_CODESIGN=1 make mac-app
+```
+
+Bridge 的配置与 SQLite 数据在 `~/Library/Application Support/MulticaRemindersBridge/`，与 Reminders 授权无关，重装应用不会清除。
+
 ### 发布新版本（维护者）
 
 在 macOS 上提交并推送所有变更后：

@@ -71,7 +71,6 @@ public struct ReminderFormatter: Sendable {
             if let error = compact(run.errorMessage, max: 220), !error.isEmpty { lines.append("Error: \(error)") }
         }
 
-        _ = actionKind // Kept here to make the title/reason mapping explicit; projection stores it separately.
         return ReminderItem(
             issueID: issue.id,
             issueKey: issue.key,
@@ -83,8 +82,19 @@ public struct ReminderFormatter: Sendable {
             url: deepLinks.issueURL(issue),
             priority: decision.severity,
             dueDate: nil,
-            alarmDate: alarmEnabled ? alarmSchedule.alarmDate(from: now) : nil
+            alarmDate: alarmDate(for: actionKind, now: now)
         )
+    }
+
+    /// Review can wait. Blocked Action Required must interrupt as soon as the reminder exists.
+    private func alarmDate(for kind: HumanActionKind, now: Date) -> Date? {
+        guard alarmEnabled else { return nil }
+        switch kind {
+        case .actionRequired:
+            return HumanAlarmSchedule.immediately.alarmDate(from: now)
+        case .review, .failed:
+            return alarmSchedule.alarmDate(from: now)
+        }
     }
 
     public func actionKind(for decision: AttentionDecision) -> HumanActionKind {

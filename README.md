@@ -8,7 +8,7 @@
 - 用户也可以直接在 Multica Review/返工/Done，Bridge 会自动回收 Apple 侧 sibling；
 - Apple checkbox 默认不承担泛化控制语义；唯一例外是当前 Review sibling：严格门禁通过后，勾选即表示审核通过并把 Multica Issue 设为 `done`。
 
-当前版本：`0.4.0`。
+当前版本：`1.0.0`。
 
 ## 核心模型
 

@@ -24,8 +24,24 @@ cp "$ROOT/resources/AppIcon.icns" "$RESOURCES/AppIcon.icns"
 chmod +x "$MACOS/MulticaRemindersBridge"
 
 if command -v codesign >/dev/null 2>&1; then
-  IDENTITY="${SIGN_IDENTITY:--}"
-  codesign --force --deep --sign "$IDENTITY" "$APP_DIR"
+  IDENTITY="$("$ROOT/scripts/resolve-sign-identity.sh")"
+  if [[ "$IDENTITY" == "skip" ]]; then
+    echo "Skipping codesign (SKIP_CODESIGN=1)." >&2
+  else
+    codesign --force --deep --sign "$IDENTITY" "$APP_DIR"
+    if [[ "$IDENTITY" == "-" ]]; then
+      cat >&2 <<'EOF'
+Signed with ad-hoc identity. macOS ties Reminders access to the app signature,
+so you may need to re-authorize after each rebuild. For stable local permissions,
+sign in to Xcode once and rebuild, or set SIGN_IDENTITY to your development cert.
+EOF
+    elif [[ -n "${SIGN_IDENTITY:-}" ]]; then
+      echo "Signed with SIGN_IDENTITY: $IDENTITY" >&2
+    else
+      echo "Signed with detected certificate: $IDENTITY" >&2
+      echo "Reminders permission should persist across make install rebuilds." >&2
+    fi
+  fi
 fi
 
 plutil -lint "$CONTENTS/Info.plist"

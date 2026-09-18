@@ -31,7 +31,9 @@ cat <<'EOT'
 Automated checks passed.
 
 Manual macOS acceptance checks still required because TCC/iCloud cannot be validated on a non-interactive CI runner:
-  1. Launch dist/Multica Reminders Bridge.app and grant Reminders access.
+  1. Launch dist/Multica Reminders Bridge.app and grant Reminders access once.
+     For repeated local installs, sign with a stable Apple Development cert (see docs/INSTALLATION.md)
+     so macOS does not treat each rebuild as a new app.
   2. Connect the `reminders-bridge` Multica CLI profile and choose a real Workspace/default Agent.
   3. Sync once; confirm `Agent Requests` and configured Project Route Lists are automatically created when missing.
   4. Create an Apple request; confirm the original Reminder becomes the Main projection and a Multica Issue/Run is created.

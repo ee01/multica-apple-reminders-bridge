@@ -107,14 +107,22 @@ final class MainAndHumanSiblingTests: XCTestCase {
         let source = MutableIssueSource(issues: [issue])
         let sink = InMemoryReminderSink()
         let db = try makeDB()
-        let config = BridgeConfiguration(projectRoutes: [route], requestDispatchEnabled: false, blockedGraceSeconds: 0)
+        let now = Date(timeIntervalSince1970: 1000)
+        let config = BridgeConfiguration(
+            projectRoutes: [route],
+            requestDispatchEnabled: false,
+            reminderAlarmSchedule: .after1Hour,
+            blockedGraceSeconds: 0
+        )
         let engine = SyncEngine(source: source, sink: sink, persistence: db, configuration: config)
 
-        _ = try await engine.sync(now: Date(timeIntervalSince1970: 1000))
+        _ = try await engine.sync(now: now)
 
         let human = try XCTUnwrap(db.projection(issueID: "4", kind: .humanAction, generation: 1))
         XCTAssertEqual(human.humanActionKind, .actionRequired)
-        XCTAssertTrue(sink.records[human.receipt!.calendarItemIdentifier!]!.item.title.hasPrefix("Action Required:"))
+        let item = try XCTUnwrap(sink.records[human.receipt!.calendarItemIdentifier!]?.item)
+        XCTAssertTrue(item.title.hasPrefix("Action Required:"))
+        XCTAssertEqual(item.alarmDate, now)
     }
 
     private func makeDB() throws -> BridgeDatabase {

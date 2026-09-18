@@ -9,9 +9,6 @@ struct MulticaRemindersBridgeApp: App {
         MenuBarExtra("Multica Bridge", systemImage: model.menuBarSymbol) {
             MenuBarView(model: model)
         }
-        Settings {
-            SettingsView(model: model)
-        }
     }
 }
 #else

@@ -26,7 +26,7 @@ public enum HumanAlarmSchedule: String, Codable, CaseIterable, Hashable, Sendabl
         case .nextMorning9:
             return "Uses the next 9:00 AM. If it is already past 9:00, this is tomorrow morning."
         default:
-            return "Sets when the Review / Action Required / Failed reminder should notify you."
+            return "Applies to Review and Failed reminders. Action Required (blocked) always notifies immediately."
         }
     }
 

@@ -48,6 +48,7 @@ final class BridgeAppModel: ObservableObject {
     private var activateObserver: NSObjectProtocol?
     private var didOfferOnboarding = false
     private var onboardingWindow: NSWindow?
+    private var settingsWindow: NSWindow?
     private let networkMonitor = NWPathMonitor()
     private let networkQueue = DispatchQueue(label: "ai.personal.multica-reminders-bridge.network")
     private var networkMonitorStarted = false
@@ -274,6 +275,7 @@ final class BridgeAppModel: ObservableObject {
 
     func removeProjectRoute(id: String) {
         configuration.projectRoutes.removeAll { $0.id == id }
+        saveConfiguration()
     }
 
     func refreshReminderPermission(prompt: Bool = true) async {
@@ -368,12 +370,29 @@ final class BridgeAppModel: ObservableObject {
     }
 
     func openSettingsWindow() {
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        if settingsWindow == nil {
+            let controller = NSHostingController(rootView: SettingsView(model: self))
+            let window = NSWindow(contentViewController: controller)
+            window.title = "Settings"
+            window.styleMask = [.titled, .closable, .resizable, .miniaturizable]
+            window.isReleasedWhenClosed = false
+            window.setContentSize(NSSize(width: 760, height: 720))
+            window.minSize = NSSize(width: 720, height: 640)
+            window.center()
+            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    self?.settingsWindow = nil
+                    AppWindowPresenter.restoreAccessoryIfNoWindows()
+                }
+            }
+            settingsWindow = window
+        }
+        if let window = settingsWindow {
+            AppWindowPresenter.raise(window)
+        }
     }
 
     func openOnboardingWindow() {
-        NSApp.activate(ignoringOtherApps: true)
         if onboardingWindow == nil {
             let controller = NSHostingController(rootView: OnboardingView(model: self))
             let window = NSWindow(contentViewController: controller)
@@ -385,11 +404,14 @@ final class BridgeAppModel: ObservableObject {
             NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
                 Task { @MainActor in
                     self?.onboardingWindow = nil
+                    AppWindowPresenter.restoreAccessoryIfNoWindows()
                 }
             }
             onboardingWindow = window
         }
-        onboardingWindow?.makeKeyAndOrderFront(nil)
+        if let window = onboardingWindow {
+            AppWindowPresenter.raise(window)
+        }
     }
 
     func closeOnboardingWindow() {
